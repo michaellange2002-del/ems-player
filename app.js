@@ -652,12 +652,31 @@
     renderHist();
   }
 
-  /* ---------- Navigation, Blätter, Hinweise ---------- */
-  function go(view) {
+  /* ---------- Navigation, Blätter, Hinweise ----------
+     Jeder Schritt (Bibliothek/Verlauf, Blatt, Player, Abschluss) bekommt einen Eintrag im Browser-Verlauf.
+     So geht die Zurück-Taste des Handys einen Schritt zurück statt die App zu schließen.
+     Unter der Startseite liegt der erste Eintrag der Seite: Wer dort landet, bekommt einen Hinweis,
+     erst der nächste Druck auf Zurück schließt die App. */
+  const ensureBase = () => { if (!history.state) history.pushState({ v: 'home' }, ''); };
+  function showView(view) {
     state.view = view;
     $$('[data-s]').forEach(el => { el.hidden = el.dataset.s !== view; });
     $$('.nav-btn[data-go]').forEach(b => (b.dataset.go === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current')));
     $('#main').scrollTop = 0;
+  }
+  function go(view) {
+    ensureBase();
+    const cur = history.state.v || 'home';
+    if (view === cur) return showView(view);
+    if (view === 'home') { history.back(); return; } // zurück auf den Start-Eintrag, popstate zeigt die Startseite
+    if (cur === 'home') history.pushState({ v: view }, '');
+    else history.replaceState({ v: view }, ''); // Bibliothek ↔ Verlauf: Zurück führt danach zur Startseite
+    showView(view);
+  }
+  function enterApp() {
+    showApp();
+    if (history.state) history.replaceState({ v: 'home' }, ''); else ensureBase();
+    showView('home');
   }
   function showLogin(msg = '') {
     $('#app').dataset.view = 'login';
@@ -666,8 +685,13 @@
     $('#loginErr').classList.remove('info');
   }
   function showApp() { $('#app').dataset.view = 'app'; }
-  function openSheet(html) { $('#sheet').innerHTML = html; $('#sheetWrap').hidden = false; }
-  function closeSheet() { $('#sheetWrap').hidden = true; state.sheet = null; }
+  function openSheet(html) {
+    if ($('#sheetWrap').hidden) { ensureBase(); history.pushState({ v: state.view, sheet: true }, ''); }
+    $('#sheet').innerHTML = html;
+    $('#sheetWrap').hidden = false;
+  }
+  function hideSheet() { $('#sheetWrap').hidden = true; state.sheet = null; }
+  function closeSheet() { if (history.state?.sheet) history.back(); else hideSheet(); }
   $('#sheetWrap').addEventListener('click', e => { if (e.target === e.currentTarget) closeSheet(); });
 
   let toastT;
@@ -736,7 +760,8 @@
       this.applyMirror();
       this.setTime(this.startAt, v.dur);
       this.playIcon(false);
-      history.pushState({ player: true }, '');
+      ensureBase();
+      history.pushState({ v: state.view, player: true }, '');
       if (v.src === 'drive') this.openDrive(v, this.startAt);
       else this.openYT(v, this.startAt);
     },
@@ -933,8 +958,20 @@
       render();
     },
   };
-  const leavePlayer = () => { if (history.state?.player) history.back(); else player.close(); };
-  window.addEventListener('popstate', () => { if (!$('#player').hidden) player.close(); });
+  // Player verlassen: Abschluss- und Player-Eintrag aus dem Verlauf nehmen, popstate räumt auf
+  const leavePlayer = () => {
+    const n = history.state?.done ? 2 : history.state?.player ? 1 : 0;
+    if (n) history.go(-n); else player.close();
+  };
+  window.addEventListener('popstate', e => {
+    const s = e.state || {};
+    if (!$('#doneWrap').hidden && !s.done) $('#doneWrap').hidden = true;
+    if (!$('#player').hidden && !s.player) player.close();
+    if (!$('#sheetWrap').hidden && !s.sheet) hideSheet();
+    if ($('#app').dataset.view !== 'app') return;
+    showView(s.v || 'home');
+    if (!e.state) toast('Zum Schließen nochmal zurück');
+  });
 
   pv.addEventListener('loadedmetadata', () => {
     if (player.pendingStart) { pv.currentTime = player.pendingStart; player.lastT = player.pendingStart; player.pendingStart = 0; }
@@ -992,6 +1029,7 @@
       <input class="note" id="doneNote" type="text" maxlength="200" placeholder="Notiz, z. B. „Waden gekrampft“" aria-label="Notiz">
       <div class="btn-row"><button class="btn-primary" data-act="saveSession">${icon('i-check')}Speichern</button><button class="btn-ghost" data-act="saveNoValues">Ohne Werte speichern</button></div>
       <div class="btn-row">${ended ? '' : '<button class="btn-ghost" data-act="closeDone">Weiter trainieren</button>'}<button class="btn-link" data-act="discardSession">Nicht speichern</button></div>`;
+    if (history.state?.player) history.pushState({ ...history.state, done: true }, ''); // Zurück schließt nur den Abschluss
     $('#doneWrap').hidden = false;
     $('#doneSheet').scrollTop = 0;
   }
@@ -1012,7 +1050,6 @@
     pos.del(v.key);
     player.ended = true;
     leavePlayer();
-    go('home');
     toast('Training gespeichert');
   }
 
@@ -1104,7 +1141,7 @@
       const cur = inp.value === '' ? 0 : +inp.value || 0;
       inp.value = clamp(cur + +t.dataset.d, 0, 100);
     },
-    closeDone: () => { $('#doneWrap').hidden = true; },
+    closeDone: () => { if (history.state?.done) history.back(); else $('#doneWrap').hidden = true; },
     saveSession: () => saveDone(true),
     saveNoValues: () => saveDone(false),
     discardSession() {
@@ -1131,7 +1168,7 @@
     $('#loginErr').classList.add('info');
     $('#loginBasic').hidden = false; // Google meldet Fehler nur im eigenen Fenster, daher den Ausweg gleich anbieten
     auth.request(scope)
-      .then(() => { showApp(); go('home'); loadAll(); })
+      .then(() => { enterApp(); loadAll(); })
       .catch(e => { if (e.silent) return; showLogin(e.message); $('#loginBasic').hidden = false; });
   };
   $('#loginBtn').onclick = () => login();
@@ -1174,8 +1211,7 @@
   if (DEMO) {
     state.driveVideos = demoData();
     state.drive = 'ok';
-    showApp();
-    go('home');
+    enterApp();
     render();
   } else if (!CFG.clientId) {
     showLogin('Die Client-ID fehlt in config.js.');
@@ -1183,11 +1219,11 @@
     auth.restore();
     ytAuth.restore();
     const old = store.get('token');
-    if (auth.valid()) { showApp(); go('home'); loadAll(); }
+    if (auth.valid()) { enterApp(); loadAll(); }
     else { render(); showLogin(old && old.v !== AUTH_VERSION ? 'Impuls darf jetzt deinen Verlauf in Google Drive speichern. Dafür brauchst du einmal eine neue Anmeldung.' : ''); }
     // Anmeldung in einem anderen Fenster oder Tab abgeschlossen: hier übernehmen
     window.addEventListener('focus', () => {
-      if ($('#app').dataset.view === 'login' && !auth.pending && auth.restore()) { showApp(); go('home'); loadAll(); }
+      if ($('#app').dataset.view === 'login' && !auth.pending && auth.restore()) { enterApp(); loadAll(); }
     });
   }
 })();
