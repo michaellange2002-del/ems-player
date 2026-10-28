@@ -484,11 +484,6 @@
       ? `<p class="streak-num"><b>${streak}</b>${streak === 1 ? 'Woche' : 'Wochen'} in Folge ${g}×</p>`
       : '<p class="sub">Nach deinem ersten Training siehst du hier deine Wochen.</p>';
 
-    const ck = store.get('check', {});
-    const checked = ck.d === dayKey(now) ? ck.items || [] : [];
-    const items = ['Anzug an, Akku geladen', 'Eaglefit-App verbunden', 'Wasser griffbereit', 'Tablet aufgestellt'];
-    const list = items.map((t, i) => `<li><label><input type="checkbox" id="ck${i}" data-ck="${i}"${checked.includes(i) ? ' checked' : ''}><span>${t}</span></label></li>`).join('');
-
     const install = state.install
       ? `<article class="card install"><div><b>Impuls als App installieren</b><span class="sub">Dann startet Impuls vom Startbildschirm im Vollbild.</span></div><button class="btn-ghost" data-act="install">Installieren</button></article>`
       : '';
@@ -498,18 +493,22 @@
       <div class="home-grid">${next}
         <article class="card week"><p class="label">Wochenziel · KW ${isoWeek(now)}</p><p class="week-count"><b>${done}</b><span>von ${g}</span></p><ul class="slots">${slots}</ul>${chip}</article>
         <article class="card streak"><p class="label">Serie · Einheiten pro Woche</p>${streakTxt}<div class="bars">${bars}</div></article>
-        <article class="card check"><p class="label">Vor dem Start</p><ul class="checklist">${list}</ul></article>
       </div>${install}`;
   }
-  $('#home').addEventListener('change', e => {
-    if (!e.target.matches('[data-ck]')) return;
-    const today = dayKey(new Date());
-    const ck = store.get('check', {});
-    const items = new Set(ck.d === today ? ck.items : []);
-    const i = +e.target.dataset.ck;
-    if (e.target.checked) items.add(i); else items.delete(i);
-    store.set('check', { d: today, items: [...items] });
-  });
+
+  /* ---------- Vor dem Start: kurzer Hinweis, einmal pro Trainingseinheit ---------- */
+  const PREP = ['Anzug an, Akku geladen', 'Eaglefit-App verbunden', 'Wasser griffbereit', 'Handtuch bereitgelegt', 'Hanteln und andere Geräte bereitgelegt, falls nötig'];
+  const PREP_PAUSE = 3 * 3600e3; // innerhalb von 3 Stunden nicht erneut zeigen (Videowechsel, Weitermachen)
+  function startTraining(v) {
+    if (Date.now() - store.get('prepOk', 0) < PREP_PAUSE) return player.open(v);
+    state.pendingVideo = v;
+    state.sheet = 'prep';
+    openSheet(`
+      <p class="label">${esc(v.title)}</p>
+      <h2 class="sheet-title">Bereit fürs Training?</h2>
+      <ul class="prep">${PREP.map(t => `<li>${icon('i-check')}<span>${t}</span></li>`).join('')}</ul>
+      <div class="btn-row"><button class="btn-primary big" data-act="prepOk">${icon('i-play', 'fill')}OK, los geht's</button><button class="btn-ghost" data-act="closeSheet">Abbrechen</button></div>`);
+  }
 
   /* ---------- Bibliothek ---------- */
   function ytNotice() {
@@ -764,7 +763,9 @@
       this.setTime(this.startAt, v.dur);
       this.playIcon(false);
       ensureBase();
-      history.pushState({ v: state.view, player: true }, '');
+      // Kommt der Start aus dem Hinweis-Blatt, ersetzt der Player dessen Eintrag: Zurück führt dann direkt zur Ansicht
+      if (history.state?.sheet) history.replaceState({ v: state.view, player: true }, '');
+      else history.pushState({ v: state.view, player: true }, '');
       if (v.src === 'drive') this.openDrive(v, this.startAt);
       else this.openYT(v, this.startAt);
     },
@@ -1157,6 +1158,13 @@
       closeSheet();
     },
     plRetry: () => player.retry(),
+    prepOk() {
+      const v = state.pendingVideo;
+      state.pendingVideo = null;
+      store.set('prepOk', Date.now());
+      hideSheet();
+      if (v) player.open(v);
+    },
     feel: t => { done.feel = +t.dataset.k; $('#feel').innerHTML = feelButtons(); },
     intStep(t) {
       const inp = $('#int' + t.dataset.i);
@@ -1179,7 +1187,7 @@
     if (t.dataset.go) go(t.dataset.go);
     else if (t.dataset.play) {
       if (state.editCats) openCatPick(t.dataset.play);
-      else { const v = state.videos.find(x => x.key === t.dataset.play); if (v) player.open(v); }
+      else { const v = state.videos.find(x => x.key === t.dataset.play); if (v) startTraining(v); }
     } else if (t.dataset.filter) { state.filter = t.dataset.filter; renderLib(); }
     else actions[t.dataset.act]?.(t);
   });

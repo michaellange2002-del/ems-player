@@ -120,12 +120,6 @@ h1,h2{text-wrap:balance}
 .chip{justify-self:start;display:inline-flex;gap:6px;align-items:center;padding:6px 10px;border-radius:999px;font-size:12.5px;font-weight:600;background:var(--app-bg);color:var(--muted)}
 .chip.ok{background:var(--ok-soft);color:var(--ok)}
 .chip.warn{background:var(--warn-soft);color:var(--warn)}
-.checklist{list-style:none;margin:0;padding:0;display:grid;gap:2px}
-.checklist label{display:flex;gap:10px;align-items:center;padding:7px 0;cursor:pointer;font-weight:550}
-.checklist input{appearance:none;-webkit-appearance:none;width:22px;height:22px;border:2px solid var(--muted);border-radius:6px;display:grid;place-items:center;margin:0;flex:none;cursor:pointer}
-.checklist input:checked{background:var(--accent);border-color:var(--accent)}
-.checklist input:checked::after{content:"";width:10px;height:5px;border-left:2.5px solid var(--accent-ink);border-bottom:2.5px solid var(--accent-ink);transform:translate(0,-1px) rotate(-45deg)}
-.checklist input:checked+span{color:var(--muted);text-decoration:line-through}
 .streak-num{font-weight:600}
 .streak-num b{font-family:var(--font-display);font-stretch:68%;font-weight:850;font-size:40px;line-height:.9;margin-right:6px}
 .bars{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;height:86px}
@@ -281,15 +275,13 @@ h1,h2{text-wrap:balance}
   .nav-btn[aria-current="page"]{background:var(--accent-soft)}
   .main{margin-left:calc(100px + env(safe-area-inset-left,0px));padding:calc(30px + env(safe-area-inset-top,0px)) max(34px,env(safe-area-inset-right,0px)) calc(34px + env(safe-area-inset-bottom,0px)) 34px}
   .a-title{font-size:38px}
-  .home-grid{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);grid-template-areas:"next week" "next streak" "check check"}
+  .home-grid{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);grid-template-areas:"next week" "next streak"}
   .next{grid-area:next}
   .week{grid-area:week}
   .streak{grid-area:streak}
-  .check{grid-area:check}
   .next .poster{aspect-ratio:2/1}
   .next-title{font-size:30px}
   .next-body{padding:20px 22px 22px}
-  .checklist{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
   .lib-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
   .vcard{grid-template-columns:1fr;align-items:start;padding:0;overflow:hidden;gap:0}
   .vcard .poster{border-radius:0}
@@ -361,3 +353,7 @@ h1,h2{text-wrap:balance}
 .login-err.info{color:var(--muted);font-weight:500}
 .yt-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;font-size:13.5px}
 .set-row{flex-wrap:wrap}
+/* Hinweis vor dem Start */
+.prep{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.prep li{display:flex;gap:12px;align-items:center;font-size:16px;font-weight:550}
+.prep .ico{width:22px;height:22px;color:var(--ok)}

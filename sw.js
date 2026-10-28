@@ -3,8 +3,8 @@
 //    weil der <video>-Player selbst keinen Authorization-Header senden kann;
 // 2. hält die App-Dateien vor, damit Impuls schnell startet und sich installieren lässt.
 // Bei jeder Änderung an app.css/app.js: Version hier und in index.html (?v=) erhöhen.
-const CACHE = 'impuls-v12';
-const SHELL = ['./', 'index.html', 'app.css?v=12', 'app.js?v=12', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
+const CACHE = 'impuls-v13';
+const SHELL = ['./', 'index.html', 'app.css?v=13', 'app.js?v=13', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 let token = null;
 
 self.addEventListener('install', e => {
