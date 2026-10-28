@@ -25,7 +25,7 @@
 // Rückkehrseite der Google-Anmeldung: legt den Token für die App ab und schließt sich wieder.
 (() => {
   const P = 'impuls.';
-  const AUTH_VERSION = 2; // wie in app.js
+  const AUTH_VERSION = 3; // wie in app.js
   const get = k => { try { return JSON.parse(localStorage.getItem(P + k)); } catch { return null; } };
   const set = (k, v) => { try { localStorage.setItem(P + k, JSON.stringify(v)); } catch { /* Speicher gesperrt */ } };
   const del = k => { try { localStorage.removeItem(P + k); } catch { /* Speicher gesperrt */ } };
@@ -40,8 +40,10 @@
   } else if (!h.get('access_token') || h.get('state') !== get('oauthState')) {
     msg.textContent = 'Diese Anmeldung passt nicht zur App. Bitte in Impuls noch einmal anmelden.';
   } else {
-    set('token', { value: h.get('access_token'), exp: Date.now() + (+h.get('expires_in') || 3600) * 1000, scope: h.get('scope') || '', v: AUTH_VERSION });
-    set('consented', AUTH_VERSION);
+    // state beginnt mit dem Zweck: "drive." (Hauptanmeldung) oder "yt." (YouTube-Playlist)
+    const purpose = h.get('state').split('.')[0] === 'yt' ? 'yt' : 'drive';
+    set(purpose === 'yt' ? 'ytToken' : 'token', { value: h.get('access_token'), exp: Date.now() + (+h.get('expires_in') || 3600) * 1000, scope: h.get('scope') || '', v: AUTH_VERSION });
+    set('consented.' + purpose, AUTH_VERSION);
     del('oauthState');
     ok = true;
     msg.textContent = 'Angemeldet.';

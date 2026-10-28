@@ -5,8 +5,9 @@
   const S_DRIVE_READ = 'https://www.googleapis.com/auth/drive.readonly';
   const S_DRIVE_FILE = 'https://www.googleapis.com/auth/drive.file';
   const S_YT = 'https://www.googleapis.com/auth/youtube.readonly';
-  const SCOPES = [S_DRIVE_READ, S_DRIVE_FILE, S_YT];
-  const AUTH_VERSION = 2; // bei neuen Berechtigungen erhöhen: dann wird einmal neu angemeldet
+  // Google erlaubt YouTube und drive.file nicht in derselben Anmeldung, daher zwei getrennte Anmeldungen.
+  const DRIVE_SCOPES = [S_DRIVE_READ, S_DRIVE_FILE].join(' ');
+  const AUTH_VERSION = 3; // bei neuen Berechtigungen erhöhen: dann wird einmal neu angemeldet
   const DRIVE = 'https://www.googleapis.com/drive/v3/';
   const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/';
   const YTAPI = 'https://www.googleapis.com/youtube/v3/';
@@ -91,6 +92,8 @@
     },
     setCategory(key, tag) { this.data.categories = { ...this.data.categories, [key]: tag }; this.data.catT = Date.now(); this.save(); sync.soon(); },
     setSettings(patch) { this.data.settings = { ...this.data.settings, ...patch }; this.data.setT = Date.now(); this.save(); sync.soon(); },
+    // YouTube-Playlist wird zwischengespeichert, damit sie ohne YouTube-Anmeldung auf allen Geräten da ist
+    setYT(yt) { this.data.yt = yt; this.data.ytT = Date.now(); this.save(); sync.soon(); },
   };
   const goal = () => db.data.settings.goal;
   const rest = () => db.data.settings.rest;
@@ -148,20 +151,21 @@
      Klassisches OAuth-Verfahren für Web-Apps (response_type=token) ohne Googles Anmeldebibliothek.
      Google leitet nach der Anmeldung auf auth.html zurück; die Seite legt den Token im Speicher ab,
      und die App übernimmt ihn von dort (auch wenn das Anmeldefenster in einem eigenen Tab lief). */
-  const auth = {
+  // purpose 'drive': Hauptanmeldung (Videos lesen, Verlauf speichern); 'yt': nur zum Laden der Playlist
+  const makeAuth = (key, purpose, defaultScope) => ({
     token: null, exp: 0, scope: '', pending: null,
     restore() {
-      const t = store.get('token');
+      const t = store.get(key);
       if (t && t.v === AUTH_VERSION && t.exp > Date.now() + 120e3) { this.token = t.value; this.exp = t.exp; this.scope = t.scope || ''; this.share(); return true; }
       return false;
     },
     valid(ms = 120e3) { return !!this.token && this.exp - Date.now() > ms; },
     has(s) { return this.scope.split(' ').includes(s); },
-    share() { navigator.serviceWorker?.controller?.postMessage({ type: 'token', token: this.token }); },
+    share() { if (purpose === 'drive') navigator.serviceWorker?.controller?.postMessage({ type: 'token', token: this.token }); },
     // Muss direkt aus einem Tipp heraus aufgerufen werden, sonst blockiert der Browser das Anmeldefenster.
-    request(scope = SCOPES.join(' ')) {
+    request(scope = defaultScope) {
       this.pending?.cancel();
-      const state = uid() + uid();
+      const state = `${purpose}.${uid()}${uid()}`;
       store.set('oauthState', state);
       store.del('oauthError');
       const params = new URLSearchParams({
@@ -170,13 +174,13 @@
         response_type: 'token',
         scope,
         state,
-        ...(store.get('consented') !== AUTH_VERSION && { prompt: 'consent' }),
+        ...(store.get('consented.' + purpose) !== AUTH_VERSION && { prompt: 'consent' }),
       });
       const url = 'https://accounts.google.com/o/oauth2/v2/auth?' + params;
       return new Promise((resolve, reject) => {
-        const before = store.get('token')?.value;
+        const before = store.get(key)?.value;
         const check = () => {
-          const t = store.get('token');
+          const t = store.get(key);
           if (t && t.v === AUTH_VERSION && t.value !== before && t.exp > Date.now()) {
             cleanup();
             this.token = t.value; this.exp = t.exp; this.scope = t.scope || '';
@@ -187,7 +191,7 @@
           const err = store.get('oauthError');
           if (err) { store.del('oauthError'); cleanup(); reject(new Error(err)); }
         };
-        const onStorage = e => { if (e.key === PREFIX + 'token' || e.key === PREFIX + 'oauthError') check(); };
+        const onStorage = e => { if (e.key === PREFIX + key || e.key === PREFIX + 'oauthError') check(); };
         const timer = setInterval(check, 700);
         const cleanup = () => {
           clearInterval(timer);
@@ -203,25 +207,27 @@
         if (!w) { store.set('returnTo', true); location.href = url; }
       });
     },
-    clear() { this.token = null; this.exp = 0; store.del('token'); },
+    clear() { this.token = null; this.exp = 0; store.del(key); },
     signOut() {
       if (this.token) fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(this.token), { method: 'POST', mode: 'no-cors' }).catch(() => {});
       this.clear();
-      store.del('consented');
+      store.del('consented.' + purpose);
     },
-  };
+  });
+  const auth = makeAuth('token', 'drive', DRIVE_SCOPES);
+  const ytAuth = makeAuth('ytToken', 'yt', S_YT);
 
-  async function gfetch(url, opts = {}) {
-    const r = await fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + auth.token, ...(opts.headers || {}) } });
+  async function gfetch(url, opts = {}, who = auth) {
+    const r = await fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + who.token, ...(opts.headers || {}) } });
     if (r.ok) return r;
     const data = await r.json().catch(() => ({}));
     const err = new Error(data.error?.message || 'Fehler ' + r.status);
     err.status = r.status;
     err.reason = [data.error?.status, ...(data.error?.errors || []).map(x => x.reason), ...(data.error?.details || []).map(x => x.reason)].filter(Boolean).join(' ');
-    if (r.status === 401) auth.clear();
+    if (r.status === 401) who.clear();
     throw err;
   }
-  const gapi = async (base, path, params) => (await gfetch(`${base}${path}?${new URLSearchParams(params)}`)).json();
+  const gapi = async (base, path, params, who = auth) => (await gfetch(`${base}${path}?${new URLSearchParams(params)}`, {}, who)).json();
 
   /* ---------- Abgleich mit Google Drive ---------- */
   // Zusammenführen: Einheiten aus beiden Ständen (gelöschte bleiben gelöscht),
@@ -233,6 +239,7 @@
     for (const s of [...(b.sessions || []), ...(a.sessions || [])]) if (s?.id && !gone.has(s.id)) byId.set(s.id, s);
     const aCat = (a.catT || 0) >= (b.catT || 0);
     const aSet = (a.setT || 0) >= (b.setT || 0);
+    const aYt = (a.ytT || 0) >= (b.ytT || 0);
     return {
       version: 1,
       sessions: [...byId.values()].sort((x, y) => x.t - y.t),
@@ -241,9 +248,11 @@
       catT: Math.max(a.catT || 0, b.catT || 0),
       settings: { ...defaults(), ...((aSet ? a.settings : b.settings) || {}) },
       setT: Math.max(a.setT || 0, b.setT || 0),
+      yt: (aYt ? a.yt : b.yt) || null,
+      ytT: Math.max(a.ytT || 0, b.ytT || 0),
     };
   }
-  const fingerprint = d => JSON.stringify([(d.sessions || []).map(s => s.id).sort(), [...(d.deleted || [])].sort(), d.catT || 0, d.setT || 0]);
+  const fingerprint = d => JSON.stringify([(d.sessions || []).map(s => s.id).sort(), [...(d.deleted || [])].sort(), d.catT || 0, d.setT || 0, d.ytT || 0]);
 
   const sync = {
     status: 'idle', last: store.get('syncedAt', 0), err: '', busy: false, again: false, timer: null,
@@ -320,7 +329,7 @@
   }
 
   /* ---------- Videos laden ---------- */
-  const state = { view: 'home', filter: 'Alle', videos: [], drive: 'idle', driveErr: '', yt: 'idle', ytErr: null, folderId: null, install: null, editCats: false, trendGroup: null, sheet: null };
+  const state = { view: 'home', filter: 'Alle', videos: [], driveVideos: [], demoYt: null, drive: 'idle', driveErr: '', ytLoading: false, ytErr: null, folderId: null, install: null, editCats: false, trendGroup: null, sheet: null };
 
   async function loadDrive() {
     const name = (CFG.folderName || 'EMS Training').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -345,54 +354,73 @@
     });
   }
 
-  async function loadYouTube() {
-    const playlist = store.get('playlist', CFG.youtubePlaylistId || '');
-    if (!playlist) return [];
+  const ytPlaylist = () => db.data.yt?.playlist || store.get('playlist', CFG.youtubePlaylistId || '');
+  // Liest die Playlist mit der YouTube-Anmeldung und speichert sie im Abgleich
+  async function fetchPlaylist(playlist) {
     const ids = [];
     let pageToken = '';
     do {
-      const r = await gapi(YTAPI, 'playlistItems', { part: 'contentDetails', playlistId: playlist, maxResults: 50, ...(pageToken && { pageToken }) });
+      const r = await gapi(YTAPI, 'playlistItems', { part: 'contentDetails', playlistId: playlist, maxResults: 50, ...(pageToken && { pageToken }) }, ytAuth);
       ids.push(...r.items.map(i => i.contentDetails.videoId));
       pageToken = r.nextPageToken || '';
     } while (pageToken && ids.length < 200);
     const vids = [];
     for (let i = 0; i < ids.length; i += 50) {
-      const r = await gapi(YTAPI, 'videos', { part: 'snippet,contentDetails', id: ids.slice(i, i + 50).join(',') });
+      const r = await gapi(YTAPI, 'videos', { part: 'snippet,contentDetails', id: ids.slice(i, i + 50).join(',') }, ytAuth);
       vids.push(...r.items);
     }
     return vids.map(v => {
       const th = v.snippet.thumbnails || {};
-      return {
-        key: 'y:' + v.id, src: 'yt', id: v.id, title: v.snippet.title, channel: v.snippet.channelTitle,
-        dur: isoDur(v.contentDetails.duration), baseTag: tagFromTitle(v.snippet.title), art: 'p-gen',
-        thumb: (th.medium || th.high || th.default || {}).url || null,
-      };
+      return { id: v.id, title: v.snippet.title, channel: v.snippet.channelTitle, dur: isoDur(v.contentDetails.duration), thumb: (th.medium || th.high || th.default || {}).url || null };
     });
   }
+  const ytVideos = () => (DEMO ? state.demoYt : db.data.yt?.items || []).map(v => ({
+    key: 'y:' + v.id, src: 'yt', id: v.id, title: v.title, channel: v.channel, dur: v.dur,
+    baseTag: tagFromTitle(v.title), art: 'p-gen', thumb: v.thumb,
+  }));
+  async function refreshYouTube(playlist = ytPlaylist()) {
+    if (!playlist || !ytAuth.valid(0)) return;
+    state.ytLoading = true;
+    renderLib();
+    try {
+      db.setYT({ playlist, items: await fetchPlaylist(playlist), at: Date.now() });
+      state.ytErr = null;
+    } catch (e) {
+      state.ytErr = ytProblem(e);
+    } finally {
+      state.ytLoading = false;
+      render();
+    }
+  }
+  const connectYouTube = () => ytAuth.request()
+    .then(() => refreshYouTube())
+    .catch(e => { if (!e.silent) toast(e.message); });
 
   function ytProblem(e) {
     const r = `${e.reason} ${e.message}`;
     if (e.status === 403 && /accessNotConfigured|SERVICE_DISABLED|has not been used|disabled/i.test(r)) {
       return { msg: 'Die YouTube-Schnittstelle ist in deinem Google-Cloud-Projekt noch nicht eingeschaltet.', action: 'api' };
     }
-    if (e.status === 403 && /insufficient|SCOPE/i.test(r)) return { msg: 'Beim Anmelden wurde der Zugriff auf YouTube nicht erlaubt.', action: 'relogin' };
+    if (e.status === 401 || (e.status === 403 && /insufficient|SCOPE/i.test(r))) return { msg: 'Die YouTube-Verbindung ist abgelaufen oder wurde nicht erlaubt.', action: 'connect' };
     if (e.status === 404 || /playlistNotFound/i.test(r)) return { msg: 'Die Playlist wurde nicht gefunden. Wähle sie unter „Mehr“ aus deinen Playlists aus.', action: 'playlist' };
     return { msg: e.message, action: 'reload' };
   }
 
   async function loadAll() {
     state.drive = 'loading';
-    state.yt = 'loading';
     render();
-    const [d, y] = await Promise.allSettled([loadDrive(), loadYouTube()]);
-    if (d.status === 'rejected' && d.reason.status === 401) return showLogin('Deine Anmeldung ist abgelaufen. Bitte melde dich neu an.');
-    state.drive = d.status === 'fulfilled' ? 'ok' : 'err';
-    state.driveErr = d.status === 'rejected' ? d.reason.message : '';
-    state.yt = y.status === 'fulfilled' ? (y.value.length ? 'ok' : 'empty') : 'err';
-    state.ytErr = y.status === 'rejected' ? ytProblem(y.reason) : null;
-    state.videos = [...(d.value || []), ...(y.value || [])];
+    try {
+      state.driveVideos = await loadDrive();
+      state.drive = 'ok';
+      state.driveErr = '';
+    } catch (e) {
+      if (e.status === 401) return showLogin('Deine Anmeldung ist abgelaufen. Bitte melde dich neu an.');
+      state.drive = 'err';
+      state.driveErr = e.message;
+    }
     render();
-    sync.run();
+    await sync.run();
+    if (ytAuth.valid()) refreshYouTube(); // YouTube nur aktualisieren, wenn noch verbunden
   }
 
   /* ---------- Start ---------- */
@@ -476,16 +504,19 @@
 
   /* ---------- Bibliothek ---------- */
   function ytNotice() {
-    if (state.yt === 'loading') return '<div class="notice"><span>Lade deine YouTube-Playlist …</span></div>';
-    if (state.yt === 'empty') return '<div class="notice"><b>Keine YouTube-Videos</b><span>Die gewählte Playlist ist leer. Unter „Mehr“ kannst du eine andere wählen.</span></div>';
-    if (state.yt !== 'err') return '';
-    const e = state.ytErr || {};
-    const btn = e.action === 'api'
-      ? '<a class="btn-ghost" href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">Schnittstelle einschalten</a><button class="btn-ghost" data-act="reload">Neu laden</button>'
-      : e.action === 'relogin' ? '<button class="btn-ghost" data-act="relogin">Neu anmelden</button>'
+    if (DEMO) return '';
+    const yt = db.data.yt;
+    if (state.ytLoading) return '<div class="notice"><span>Lade deine YouTube-Playlist …</span></div>';
+    if (state.ytErr) {
+      const e = state.ytErr;
+      const btn = e.action === 'api'
+        ? '<a class="btn-ghost" href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">Schnittstelle einschalten</a><button class="btn-ghost" data-act="ytConnect">Nochmal versuchen</button>'
         : e.action === 'playlist' ? '<button class="btn-ghost" data-act="settings">Playlist wählen</button>'
-          : '<button class="btn-ghost" data-act="reload">Neu laden</button>';
-    return `<div class="notice bad"><b>YouTube-Videos nicht geladen</b><span>${esc(e.msg)}</span><div class="btn-row">${btn}</div></div>`;
+          : '<button class="btn-ghost" data-act="ytConnect">Neu verbinden</button>';
+      return `<div class="notice bad"><b>YouTube-Playlist nicht geladen</b><span>${esc(e.msg)}</span><div class="btn-row">${btn}</div></div>`;
+    }
+    if (!yt) return '<div class="notice"><b>YouTube verbinden</b><span>Melde dich einmal bei YouTube an, dann lädt Impuls deine Playlist. Abspielen klappt danach ohne YouTube-Anmeldung, auf allen Geräten.</span><div class="btn-row"><button class="btn-primary" data-act="ytConnect">YouTube verbinden</button></div></div>';
+    return `<div class="yt-bar"><span class="sub">YouTube-Playlist · ${yt.items.length} Videos · aktualisiert ${relTime(yt.at)}</span><button class="btn-ghost small-btn" data-act="ytRefresh">Aktualisieren</button></div>`;
   }
 
   function renderLib() {
@@ -605,7 +636,13 @@
       ${buttons}`);
   }
 
-  function render() { applyTags(); renderHome(); renderLib(); renderHist(); }
+  function render() {
+    state.videos = [...state.driveVideos, ...ytVideos()];
+    applyTags();
+    renderHome();
+    renderLib();
+    renderHist();
+  }
 
   /* ---------- Navigation, Blätter, Hinweise ---------- */
   function go(view) {
@@ -668,7 +705,7 @@
     mirrored: store.get('mirror', false),
 
     open(v) {
-      if (!DEMO && !auth.valid(30 * 60e3)) {
+      if (!DEMO && v.src === 'drive' && !auth.valid(30 * 60e3)) {
         // Token läuft bald ab: vor dem Training erneuern, damit das Video nicht mittendrin abbricht.
         auth.request().then(() => this.open(v)).catch(e => toast(e.message));
         return;
@@ -976,7 +1013,7 @@
   function openSettings() {
     state.sheet = 'settings';
     const s = db.data.settings;
-    const pl = store.get('playlist', CFG.youtubePlaylistId || '');
+    const pl = ytPlaylist();
     openSheet(`
       <h2 class="sheet-title">Einstellungen</h2>
       <div class="set-list">
@@ -985,7 +1022,7 @@
         <div class="set-row"><div><b>Wochenziel</b><span class="sub">Einheiten pro Woche</span></div>${stepper('goal', s.goal, '×')}</div>
         <div class="set-row"><div><b>Mindestpause</b><span class="sub">Tage zwischen zwei Einheiten</span></div>${stepper('rest', s.rest, s.rest === 1 ? ' Tag' : ' Tage')}</div>
         <div class="set-col"><b>Muskelgruppen</b><span class="sub">Eine pro Zeile, so wie in deiner Eaglefit-App.</span><textarea id="groupsInput" rows="6" aria-label="Muskelgruppen">${esc(s.groups.join('\n'))}</textarea><div class="btn-row"><button class="btn-ghost" data-act="saveGroups">Übernehmen</button></div></div>
-        <div class="set-row"><div><b>YouTube-Playlist</b><span class="sub">${pl ? esc(pl) : 'Keine gewählt'}</span></div><button class="btn-ghost" data-act="listPlaylists">Ändern</button></div>
+        <div class="set-row"><div><b>YouTube-Playlist</b><span class="sub">${pl ? esc(pl) : 'Keine gewählt'}${db.data.yt ? ` · aktualisiert ${relTime(db.data.yt.at)}` : ''}</span></div><span class="btn-row"><button class="btn-ghost" data-act="ytRefresh">Aktualisieren</button><button class="btn-ghost" data-act="listPlaylists">Ändern</button></span></div>
         <div class="pick" id="plPick"></div>
         ${state.install ? '<div class="set-row"><div><b>Als App installieren</b><span class="sub">Impuls auf den Startbildschirm legen</span></div><button class="btn-ghost" data-act="install">Installieren</button></div>' : ''}
         <div class="set-row"><div><b>Test-Player</b><span class="sub">Prüft das Abspielen auf diesem Gerät</span></div><a class="btn-ghost" href="test.html">Öffnen</a></div>
@@ -1002,13 +1039,19 @@
       .catch(e => toast(e.message)),
     settings: () => openSettings(),
     closeSheet: () => closeSheet(),
-    signout: () => { auth.signOut(); closeSheet(); state.videos = []; showLogin(); },
+    signout: () => { auth.signOut(); ytAuth.signOut(); closeSheet(); state.driveVideos = []; showLogin(); },
     syncNow: () => sync.run(),
+    ytConnect: () => connectYouTube(),
+    ytRefresh: () => (ytAuth.valid() ? refreshYouTube() : connectYouTube()),
     async listPlaylists() {
+      if (!ytAuth.valid()) {
+        ytAuth.request().then(() => actions.listPlaylists()).catch(e => { if (!e.silent) toast(e.message); });
+        return;
+      }
       const box = $('#plPick');
       box.innerHTML = '<p class="sub">Lade deine Playlists …</p>';
       try {
-        const r = await gapi(YTAPI, 'playlists', { part: 'snippet,contentDetails', mine: 'true', maxResults: 50 });
+        const r = await gapi(YTAPI, 'playlists', { part: 'snippet,contentDetails', mine: 'true', maxResults: 50 }, ytAuth);
         box.innerHTML = r.items.length
           ? r.items.map(p => `<button class="pick-btn" data-act="pickPlaylist" data-id="${esc(p.id)}"><b>${esc(p.snippet.title)}</b><span class="sub small">${p.contentDetails.itemCount} Videos</span></button>`).join('')
           : '<p class="sub">Du hast noch keine Playlists.</p>';
@@ -1016,7 +1059,7 @@
         box.innerHTML = `<p class="sub">${esc(ytProblem(e).msg)}</p>`;
       }
     },
-    pickPlaylist: t => { store.set('playlist', t.dataset.id); closeSheet(); toast('Playlist gewählt'); loadAll(); },
+    pickPlaylist: t => { store.set('playlist', t.dataset.id); closeSheet(); toast('Playlist gewählt'); refreshYouTube(t.dataset.id); },
     setStep(t) {
       const k = t.dataset.k;
       const lim = k === 'goal' ? [1, 7] : [0, 6];
@@ -1084,7 +1127,7 @@
       .catch(e => { if (e.silent) return; showLogin(e.message); $('#loginBasic').hidden = false; });
   };
   $('#loginBtn').onclick = () => login();
-  $('#loginBasic').onclick = () => login([S_DRIVE_READ, S_YT].join(' '));
+  $('#loginBasic').onclick = () => login(S_DRIVE_READ);
 
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); state.install = e; renderHome(); });
 
@@ -1092,7 +1135,7 @@
   function demoData() {
     const own = [['Lanzarote', 1267], ['Norwegen Woche 2', 1362], ['Oberkörper Eskalation', 1340], ['Rücken Schulter Workout', 1264], ['Training in Norwegen', 1275]]
       .map(([title, dur]) => ({ key: 'd:demo-' + title, src: 'drive', id: 'demo', title, dur, baseTag: tagForName(title), art: artFor(title), thumb: null }));
-    const yt = [{ key: 'y:y_06KgZeT9c', src: 'yt', id: 'y_06KgZeT9c', title: '20 Minuten eaglefit EMS Ganzkörper-Workout', channel: 'eaglefit', dur: 1337, baseTag: 'Ganzkörper', art: 'p-gen', thumb: 'https://i.ytimg.com/vi/y_06KgZeT9c/mqdefault.jpg' }];
+    state.demoYt = [{ id: 'y_06KgZeT9c', title: '20 Minuten eaglefit EMS Ganzkörper-Workout', channel: 'eaglefit', dur: 1337, thumb: 'https://i.ytimg.com/vi/y_06KgZeT9c/mqdefault.jpg' }];
     if (!db.data.sessions.length) {
       const mon = monday(new Date());
       let i = 0;
@@ -1107,7 +1150,7 @@
       }
       db.save();
     }
-    return [...own, ...yt];
+    return own;
   }
 
   /* ---------- Start der App ---------- */
@@ -1121,9 +1164,8 @@
 
   db.load();
   if (DEMO) {
-    state.videos = demoData();
+    state.driveVideos = demoData();
     state.drive = 'ok';
-    state.yt = 'ok';
     showApp();
     go('home');
     render();
@@ -1131,6 +1173,7 @@
     showLogin('Die Client-ID fehlt in config.js.');
   } else {
     auth.restore();
+    ytAuth.restore();
     const old = store.get('token');
     if (auth.valid()) { showApp(); go('home'); loadAll(); }
     else { render(); showLogin(old && old.v !== AUTH_VERSION ? 'Impuls darf jetzt deinen Verlauf in Google Drive speichern. Dafür brauchst du einmal eine neue Anmeldung.' : ''); }
