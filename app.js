@@ -511,21 +511,45 @@
         videoId: v.id,
         width: '100%',
         height: '100%',
-        playerVars: { playsinline: 1, rel: 0, controls: 0, iv_load_policy: 3, fs: 0, disablekb: 1, start: Math.floor(start), origin: location.origin },
+        playerVars: { playsinline: 1, rel: 0, controls: 0, iv_load_policy: 3, cc_load_policy: 0, hl: 'de', fs: 0, disablekb: 1, start: Math.floor(start), origin: location.origin },
         events: {
+          onReady: () => { this.hideCaptions(); this.fitYT(); },
+          onApiChange: () => this.hideCaptions(),
           onStateChange: e => this.ytState(e.data),
           onError: e => this.ytError(e.data),
         },
       });
+      this.fitYT();
       clearInterval(this.poll);
       this.poll = setInterval(() => {
         if (this.yt?.getCurrentTime) this.tick(this.yt.getCurrentTime(), this.yt.getDuration() || v.dur);
       }, 500);
     },
     ytState(s) {
-      if (s === 1) this.onPlay();
+      const host = $('#ytHost');
+      if (s === 1) { host.style.visibility = ''; host.classList.remove('touch'); this.hideCaptions(); this.onPlay(); }
       else if (s === 2) this.onPause();
-      else if (s === 0) this.finish(true);
+      else if (s === 0) { host.style.visibility = 'hidden'; this.finish(true); } // Endbildschirm mit Vorschlägen verbergen
+    },
+    hideCaptions() {
+      for (const m of ['captions', 'cc']) { try { this.yt?.unloadModule?.(m); } catch { /* Modul nicht geladen */ } }
+      try { this.yt?.setOption?.('captions', 'track', {}); } catch { /* keine Untertitel vorhanden */ }
+    },
+    // Der YouTube-Rahmen wird höher als das Video gemacht und oben und unten abgeschnitten.
+    // So liegen YouTubes Titelzeile, Logo, Link- und Vorschlagsleiste außerhalb des sichtbaren Bereichs.
+    fitYT() {
+      const host = $('#ytHost');
+      const frame = host.querySelector('iframe');
+      if (!frame) return;
+      const W = host.clientWidth, H = host.clientHeight;
+      let vw = W, vh = W * 9 / 16;
+      if (vh > H) { vh = H; vw = H * 16 / 9; }
+      const extra = Math.round(Math.max(170, vh * 0.4));
+      Object.assign(frame.style, {
+        width: `${vw}px`, height: `${vh + 2 * extra}px`,
+        left: `${(W - vw) / 2}px`, top: `${(H - vh) / 2 - extra}px`,
+        clipPath: `inset(${extra}px 0 ${extra}px 0)`,
+      });
     },
     ytError(code) {
       const blocked = code === 101 || code === 150;
@@ -554,7 +578,12 @@
       this.yt.playVideo();
       setTimeout(() => {
         const s = this.yt?.getPlayerState?.();
-        if (this.v && s !== 1 && s !== 3) { this.showBig(false); this.msg('Tippe einmal direkt ins Video, um es zu starten.'); }
+        if (this.v && s !== 1 && s !== 3) {
+          // Startet der Browser das Video nicht über die App, darf man einmal direkt hineintippen.
+          $('#ytHost').classList.add('touch');
+          this.showBig(false);
+          this.msg('Tippe einmal direkt ins Video, um es zu starten.');
+        }
       }, 1800);
     },
 
@@ -581,13 +610,14 @@
       $('#plStage').classList.toggle('mirror', this.mirrored);
       $('#plMirror').setAttribute('aria-pressed', this.mirrored);
     },
-    // Bedienleisten blenden sich bei eigenen Videos nach 4 s aus, ein Tipp holt sie zurück.
+    isPlaying() { return this.kind === 'yt' ? this.yt?.getPlayerState?.() === 1 : !pv.paused; },
+    // Bedienleisten blenden sich beim Abspielen nach 4 s aus, ein Tipp holt sie zurück.
     armIdle() {
       clearTimeout(this.idleT);
       $('#player').classList.remove('idle');
-      if (this.kind === 'drive' && !pv.paused) this.idleT = setTimeout(() => $('#player').classList.add('idle'), 4000);
+      if (this.isPlaying()) this.idleT = setTimeout(() => $('#player').classList.add('idle'), 4000);
     },
-    wakeUi() { clearTimeout(this.idleT); $('#player').classList.remove('idle'); if (this.kind === 'drive' && !pv.paused) this.armIdle(); },
+    wakeUi() { clearTimeout(this.idleT); $('#player').classList.remove('idle'); if (this.isPlaying()) this.armIdle(); },
 
     finish(ended) {
       if (!this.v || !$('#doneWrap').hidden) return;
@@ -621,6 +651,8 @@
       try { this.yt?.destroy(); } catch { /* schon weg */ }
       this.yt = null;
       $('#ytHost').innerHTML = '';
+      $('#ytHost').style.visibility = '';
+      $('#ytHost').classList.remove('touch');
       wake.off();
       $('#player').hidden = true;
       $('#doneWrap').hidden = true;
@@ -660,7 +692,10 @@
     const d = player.dur();
     if (d) player.seekTo(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * d);
   };
-  $('#player').addEventListener('pointerdown', () => player.wakeUi());
+  // Tipp aufs Video: Sind die Leisten ausgeblendet, holt er sie nur zurück, sonst Play/Pause.
+  $('#player').addEventListener('pointerdown', () => { player.wasIdle = $('#player').classList.contains('idle'); player.wakeUi(); });
+  $('#plStage').addEventListener('click', () => { if (!player.wasIdle) player.toggle(); });
+  window.addEventListener('resize', () => { if (player.v && player.kind === 'yt') player.fitYT(); });
 
   /* ---------- Abschluss ---------- */
   function openDone(v, sec, ended) {

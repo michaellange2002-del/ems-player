@@ -173,7 +173,10 @@ h1,h2{text-wrap:balance}
 .pl-video{position:absolute;inset:0;display:grid;place-items:center;overflow:hidden}
 .pl-stage{position:relative;width:100%;height:100%}
 .pl-stage video{display:block;width:100%;height:100%;object-fit:contain;background:var(--player-bg)}
-#ytHost,#ytHost iframe{display:block;width:100%;height:100%;border:0}
+#ytHost{position:relative;width:100%;height:100%;overflow:hidden}
+/* YouTube-Fenster nimmt keine Tipps an: keine Links nach draußen, Bedienung nur über die App */
+#ytHost iframe{position:absolute;display:block;border:0;pointer-events:none}
+#ytHost.touch iframe{pointer-events:auto}
 .pl-stage.mirror{transform:scaleX(-1)}
 .pl-bigplay{position:absolute;left:50%;top:50%;width:88px;height:88px;margin:-44px 0 0 -44px;border-radius:50%;border:0;background:var(--player-fg);color:var(--player-bg);display:grid;place-items:center;z-index:2}
 .pl-bigplay .ico{width:36px;height:36px;margin-left:4px}
@@ -198,12 +201,6 @@ h1,h2{text-wrap:balance}
 .pl-play{width:64px;height:64px;border-radius:50%;border:0;background:var(--player-fg);color:var(--player-bg);display:grid;place-items:center}
 .pl-play .ico{width:26px;height:26px}
 .pl-finish{flex-basis:100%;display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:14px;padding:13px 18px;background:var(--player-accent);color:#fff;font-weight:700;font-size:15px}
-/* YouTube: Bedienleisten nicht über das Video legen, damit YouTube-eigene Knöpfe (z. B. Werbung überspringen) frei bleiben */
-.player.yt{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto}
-.player.yt .pl-top,.player.yt .pl-video,.player.yt .pl-bottom{position:relative;inset:auto}
-.player.yt .pl-top{grid-row:1;background:none;padding-bottom:10px}
-.player.yt .pl-video{grid-row:2}
-.player.yt .pl-bottom{grid-row:3;background:none;padding-top:10px}
 
 /* Blätter (Abschluss, Einstellungen) */
 .sheet-wrap{position:fixed;inset:0;z-index:30;background:var(--scrim);display:flex;align-items:flex-end}
@@ -288,13 +285,11 @@ h1,h2{text-wrap:balance}
   .next .poster{aspect-ratio:2.4/1}
   .week-count b{font-size:44px}
   .pl-top{padding-top:calc(8px + env(safe-area-inset-top,0px));padding-bottom:18px}
-  .player.yt .pl-top{padding-bottom:6px}
   .pl-title{font-size:17px}
   .pl-sub{display:none}
   .pl-btn{padding:8px 12px;font-size:13px}
   .pl-btn span{display:none}
   .pl-bottom{gap:2px;padding-top:22px;padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}
-  .player.yt .pl-bottom{padding-top:4px}
   .pl-el{font-size:24px}
   .pl-bar{padding:6px 0}
   .pl-ctrl{flex-wrap:nowrap;justify-content:flex-start;gap:8px}
