@@ -852,7 +852,7 @@
     }).join('');
 
     $('#hist').innerHTML = `${histHead(`${all.length} ${all.length === 1 ? 'Messung' : 'Messungen'} seit ${fmtDay(fromKey(all[0].d))}`)}
-      <div class="stats">${tile('weight', 'kg Gewicht')}${bmiTile}${tile('waist', 'cm Bauch')}</div>
+      <div class="stats">${tile('weight', 'kg Gewicht')}${bmiTile}${tile('fat', '% Körperfett')}</div>
       <div class="hist-grid body-grid">
         <article class="card"><p class="label">${esc(bodyName(k))}${bodyUnit(k) ? ` in ${bodyUnit(k)}` : ''} · letzte 20 Messungen</p>${trend}</article>
         <article class="card body-vals"><p class="label">Aktuelle Werte · Änderung seit Beginn</p><div class="kv kv3">${rows}</div></article>
