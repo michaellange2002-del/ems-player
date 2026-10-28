@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0B0E13">
+<title>Impuls · Test-Player</title>
+<script src="config.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root{--bg:#0B0E13;--card:#151A22;--line:#262D39;--fg:#EEF1F6;--muted:#9AA4B3;--accent:#6F8BFF;--accent-ink:#0A0F1F;--ok:#4CC792;--bad:#FF7A6B;--warn:#F1BC5E;color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:16px;line-height:1.5}
+  main{max-width:860px;margin:0 auto;padding-block:20px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:16px}
+  h1{font-size:26px;margin:4px 0 2px}
+  p{margin:0}
+  .sub{color:var(--muted)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;display:grid;gap:12px;min-width:0}
+  .card h2{font-size:13px;margin:0;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  button{font:inherit;font-weight:650;border:0;border-radius:12px;padding:13px 18px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
+  button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+  button:disabled{opacity:.4;cursor:default}
+  button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  input{font:inherit;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:11px 12px;min-width:0;flex:1}
+  .list{display:grid;gap:8px}
+  .vid{display:flex;justify-content:space-between;gap:12px;align-items:center;text-align:left;background:var(--bg);color:var(--fg);border:1px solid var(--line)}
+  .vid small{color:var(--muted);font-weight:500;white-space:nowrap}
+  .vid[aria-pressed="true"]{border-color:var(--accent)}
+  video{width:100%;max-height:60vh;background:#000;border-radius:12px}
+  progress{width:100%}
+  .checks{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+  .checks li{display:grid;grid-template-columns:24px 1fr;gap:8px}
+  .checks i{font-style:normal;font-weight:800;text-align:center}
+  .checks [data-s="ok"] i{color:var(--ok)}
+  .checks [data-s="bad"] i{color:var(--bad)}
+  .checks [data-s="wait"] i{color:var(--muted)}
+  .checks small{display:block;color:var(--muted)}
+  .msg{color:var(--warn)}
+  pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px;margin:0}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Impuls · Test-Player</h1>
+    <p class="sub">Prüft, ob deine Videos aus Google Drive auf diesem Gerät sauber laufen.</p>
+  </header>
+
+  <section class="card">
+    <h2>1 · Anmelden</h2>
+    <p class="msg" id="cfgMsg" hidden></p>
+    <div class="row"><button id="login">Mit Google anmelden</button><span class="sub" id="who"></span></div>
+  </section>
+
+  <section class="card">
+    <h2>2 · Video wählen</h2>
+    <div class="row"><input id="folder" aria-label="Ordnername in Google Drive"><button class="ghost" id="search" disabled>Suchen</button></div>
+    <div class="list" id="list"><p class="sub">Nach dem Anmelden erscheinen hier deine Videos. Für den Test am besten „Rücken Schulter Workout“ nehmen, das ist am kleinsten.</p></div>
+  </section>
+
+  <section class="card">
+    <h2>3 · Abspielen</h2>
+    <video id="v" controls playsinline preload="metadata"></video>
+    <div class="row">
+      <button class="ghost" id="seek15" disabled>Zu Minute 15</button>
+      <button class="ghost" id="toEnd" disabled>Zum Ende (−5 s)</button>
+      <button class="ghost" id="fs" disabled>Vollbild</button>
+      <button class="ghost" id="full" disabled>Reserve: komplett laden</button>
+    </div>
+    <progress id="prog" max="1" value="0" hidden></progress>
+    <p class="sub" id="resumeInfo"></p>
+  </section>
+
+  <section class="card">
+    <h2>4 · Ergebnis</h2>
+    <ul class="checks" id="checks"></ul>
+    <p class="sub">Für „Fortsetzen“: Video ein Stück laufen lassen, Seite neu laden, neu anmelden und dasselbe Video wählen.</p>
+    <div class="row"><button id="copy">Bericht kopieren</button><span class="sub" id="copyMsg"></span></div>
+    <pre id="report" hidden></pre>
+  </section>
+</main>
+<script src="test.js"></script>
+</body>
+</html>

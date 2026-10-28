@@ -3,83 +3,105 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0B0E13">
-<title>Impuls · Test-Player</title>
+<meta name="theme-color" content="#0A0D12">
+<title>Impuls</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="app.css">
 <script src="config.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<style>
-  :root{--bg:#0B0E13;--card:#151A22;--line:#262D39;--fg:#EEF1F6;--muted:#9AA4B3;--accent:#6F8BFF;--accent-ink:#0A0F1F;--ok:#4CC792;--bad:#FF7A6B;--warn:#F1BC5E;color-scheme:dark}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:16px;line-height:1.5}
-  main{max-width:860px;margin:0 auto;padding-block:20px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:16px}
-  h1{font-size:26px;margin:4px 0 2px}
-  p{margin:0}
-  .sub{color:var(--muted)}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;display:grid;gap:12px;min-width:0}
-  .card h2{font-size:13px;margin:0;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
-  button{font:inherit;font-weight:650;border:0;border-radius:12px;padding:13px 18px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
-  button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
-  button:disabled{opacity:.4;cursor:default}
-  button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-  input{font:inherit;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:11px 12px;min-width:0;flex:1}
-  .list{display:grid;gap:8px}
-  .vid{display:flex;justify-content:space-between;gap:12px;align-items:center;text-align:left;background:var(--bg);color:var(--fg);border:1px solid var(--line)}
-  .vid small{color:var(--muted);font-weight:500;white-space:nowrap}
-  .vid[aria-pressed="true"]{border-color:var(--accent)}
-  video{width:100%;max-height:60vh;background:#000;border-radius:12px}
-  progress{width:100%}
-  .checks{list-style:none;margin:0;padding:0;display:grid;gap:8px}
-  .checks li{display:grid;grid-template-columns:24px 1fr;gap:8px}
-  .checks i{font-style:normal;font-weight:800;text-align:center}
-  .checks [data-s="ok"] i{color:var(--ok)}
-  .checks [data-s="bad"] i{color:var(--bad)}
-  .checks [data-s="wait"] i{color:var(--muted)}
-  .checks small{display:block;color:var(--muted)}
-  .msg{color:var(--warn)}
-  pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px;margin:0}
-</style>
 </head>
 <body>
-<main>
-  <header>
-    <h1>Impuls · Test-Player</h1>
-    <p class="sub">Prüft, ob deine Videos aus Google Drive auf diesem Gerät sauber laufen.</p>
-  </header>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V11M10 20V5M16 20v-7M21 20H3"/></symbol>
+  <symbol id="i-cog" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.6v14.8a.8.8 0 0 0 1.2.7l12-7.4a.8.8 0 0 0 0-1.4l-12-7.4A.8.8 0 0 0 7 4.6z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4.5" width="4" height="15" rx="1"/><rect x="14" y="4.5" width="4" height="15" rx="1"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18M8 7l-5 5 5 5M16 7l5 5-5 5"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+</svg>
 
-  <section class="card">
-    <h2>1 · Anmelden</h2>
-    <p class="msg" id="cfgMsg" hidden></p>
-    <div class="row"><button id="login">Mit Google anmelden</button><span class="sub" id="who"></span></div>
-  </section>
-
-  <section class="card">
-    <h2>2 · Video wählen</h2>
-    <div class="row"><input id="folder" aria-label="Ordnername in Google Drive"><button class="ghost" id="search" disabled>Suchen</button></div>
-    <div class="list" id="list"><p class="sub">Nach dem Anmelden erscheinen hier deine Videos. Für den Test am besten „Rücken Schulter Workout“ nehmen, das ist am kleinsten.</p></div>
-  </section>
-
-  <section class="card">
-    <h2>3 · Abspielen</h2>
-    <video id="v" controls playsinline preload="metadata"></video>
-    <div class="row">
-      <button class="ghost" id="seek15" disabled>Zu Minute 15</button>
-      <button class="ghost" id="toEnd" disabled>Zum Ende (−5 s)</button>
-      <button class="ghost" id="fs" disabled>Vollbild</button>
-      <button class="ghost" id="full" disabled>Reserve: komplett laden</button>
+<div class="app" id="app" data-view="login">
+  <section class="login" id="login">
+    <div class="login-box">
+      <h1 class="login-logo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12h6V4h4v16h4v-8h8"/></svg>Impuls</h1>
+      <p class="lede">Deine EMS-Trainingsvideos aus Google Drive und YouTube.</p>
+      <button class="btn-primary big" id="loginBtn">Mit Google anmelden</button>
+      <p class="login-err" id="loginErr" hidden></p>
+      <p class="sub small">Impuls liest nur deine Videos und deine YouTube-Playlist. Beim ersten Mal zeigt Google „App nicht überprüft“. Tippe dann auf „Erweitert“ und gehe weiter zur App.</p>
     </div>
-    <progress id="prog" max="1" value="0" hidden></progress>
-    <p class="sub" id="resumeInfo"></p>
   </section>
 
-  <section class="card">
-    <h2>4 · Ergebnis</h2>
-    <ul class="checks" id="checks"></ul>
-    <p class="sub">Für „Fortsetzen“: Video ein Stück laufen lassen, Seite neu laden, neu anmelden und dasselbe Video wählen.</p>
-    <div class="row"><button id="copy">Bericht kopieren</button><span class="sub" id="copyMsg"></span></div>
-    <pre id="report" hidden></pre>
+  <nav class="nav" aria-label="Navigation">
+    <div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12h6V4h4v16h4v-8h8"/></svg><span>Impuls</span></div>
+    <button class="nav-btn" data-go="home"><svg class="ico"><use href="#i-home"/></svg><span>Start</span></button>
+    <button class="nav-btn" data-go="lib"><svg class="ico"><use href="#i-grid"/></svg><span>Bibliothek</span></button>
+    <button class="nav-btn" data-go="hist"><svg class="ico"><use href="#i-chart"/></svg><span>Verlauf</span></button>
+    <span class="nav-space"></span>
+    <button class="nav-btn" data-act="settings"><svg class="ico"><use href="#i-cog"/></svg><span>Mehr</span></button>
+  </nav>
+
+  <main class="main" id="main">
+    <section class="scr" data-s="home" id="home"></section>
+    <section class="scr" data-s="lib" id="lib" hidden></section>
+    <section class="scr" data-s="hist" id="hist" hidden></section>
+  </main>
+
+  <section class="player" id="player" hidden>
+    <div class="pl-video">
+      <div class="pl-stage" id="plStage">
+        <video id="pv" playsinline preload="auto"></video>
+        <div id="ytHost" hidden></div>
+      </div>
+      <button class="pl-bigplay" id="plBig" aria-label="Abspielen"><svg class="ico fill"><use href="#i-play"/></svg></button>
+    </div>
+    <div class="pl-top">
+      <button class="pl-btn" id="plBack"><svg class="ico"><use href="#i-left"/></svg>Zurück</button>
+      <div class="pl-head"><p class="pl-title" id="plTitle"></p><p class="pl-sub" id="plSub"></p></div>
+      <button class="pl-btn" id="plRestart" hidden>Von vorn</button>
+      <span class="pl-wake" id="plWake"><i></i>Bildschirm bleibt an</span>
+    </div>
+    <div class="pl-bottom">
+      <p class="pl-msg" id="plMsg" hidden></p>
+      <div class="pl-times"><span class="pl-el" id="plEl">0:00</span><span class="pl-rem" id="plRem"></span></div>
+      <div class="pl-bar" id="plBar"><div class="pl-track"><div class="pl-fill" id="plFill"></div></div></div>
+      <div class="pl-ctrl">
+        <button class="pl-btn" id="plB10">−10 s</button>
+        <button class="pl-play" id="plToggle" aria-label="Abspielen"><svg class="ico fill"><use href="#i-play"/></svg></button>
+        <button class="pl-btn" id="plF10">+10 s</button>
+        <button class="pl-btn" id="plMirror" aria-pressed="false"><svg class="ico"><use href="#i-mirror"/></svg><span>Spiegeln</span></button>
+        <button class="pl-btn" id="plFull" aria-label="Vollbild"><svg class="ico"><use href="#i-expand"/></svg></button>
+        <button class="pl-finish" id="plFinish"><svg class="ico"><use href="#i-check"/></svg>Training abschließen</button>
+      </div>
+    </div>
   </section>
-</main>
+
+  <section class="sheet-wrap" id="doneWrap" hidden>
+    <div class="sheet" role="dialog" aria-labelledby="doneTitle">
+      <p class="label" id="doneLabel"></p>
+      <h2 class="sheet-title" id="doneTitle"></h2>
+      <p id="doneText"></p>
+      <div class="btn-row" id="doneBtns"></div>
+    </div>
+  </section>
+
+  <section class="sheet-wrap" id="setWrap" hidden>
+    <div class="sheet" role="dialog" aria-labelledby="setTitle">
+      <h2 class="sheet-title" id="setTitle">Einstellungen</h2>
+      <div class="set-list" id="setBody"></div>
+      <div class="btn-row"><button class="btn-ghost" data-act="closeSettings">Schließen</button></div>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+</div>
 <script src="app.js"></script>
 </body>
 </html>

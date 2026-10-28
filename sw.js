@@ -1,9 +1,21 @@
-// Service Worker: reicht Video-Anfragen an Google Drive weiter und hängt dabei den Login an.
-// Der <video>-Player kann selbst keinen Authorization-Header senden, deshalb läuft das hier.
+// Service Worker:
+// 1. reicht Video-Anfragen (stream/<id>) an Google Drive weiter und hängt dabei den Login an,
+//    weil der <video>-Player selbst keinen Authorization-Header senden kann;
+// 2. hält die App-Dateien vor, damit Impuls schnell startet und sich installieren lässt.
+const CACHE = 'impuls-v1';
+const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 let token = null;
 
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting()));
+});
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim()),
+  );
+});
 self.addEventListener('message', e => {
   if (e.data?.type === 'token') token = e.data.token;
 });
@@ -35,7 +47,24 @@ async function stream(id, request) {
   return res;
 }
 
+// App-Dateien: erst aus dem Netz (damit Updates sofort ankommen), ohne Netz aus dem Speicher.
+async function shell(request) {
+  try {
+    const res = await fetch(request);
+    if (res.ok && res.type === 'basic') {
+      const copy = res.clone();
+      caches.open(CACHE).then(c => c.put(request, copy));
+    }
+    return res;
+  } catch {
+    return (await caches.match(request, { ignoreSearch: true }))
+      || (request.mode === 'navigate' ? caches.match('index.html') : Response.error());
+  }
+}
+
 self.addEventListener('fetch', e => {
-  const m = new URL(e.request.url).pathname.match(/\/stream\/([\w-]+)$/);
-  if (m) e.respondWith(stream(m[1], e.request));
+  const url = new URL(e.request.url);
+  const m = url.pathname.match(/\/stream\/([\w-]+)$/);
+  if (m) return e.respondWith(stream(m[1], e.request));
+  if (e.request.method === 'GET' && url.origin === self.location.origin) e.respondWith(shell(e.request));
 });
