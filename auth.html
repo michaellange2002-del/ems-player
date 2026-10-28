@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0A0D12">
+<title>Impuls · Anmeldung</title>
+<style>
+  :root{--bg:#F5F7FA;--fg:#11151C;--muted:#586272;--accent:#2350EE}
+  @media (prefers-color-scheme: dark){:root{--bg:#0A0D12;--fg:#E7EBF1;--muted:#98A2B2;--accent:#7B93FF;color-scheme:dark}}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;text-align:center}
+  main{display:grid;gap:14px;max-width:34ch}
+  p{margin:0;line-height:1.45}
+  .sub{color:var(--muted)}
+  a{color:var(--accent);font-weight:700}
+</style>
+</head>
+<body>
+<main>
+  <p id="msg">Anmeldung wird übernommen …</p>
+  <p class="sub" id="hint" hidden>Du kannst dieses Fenster schließen. Impuls macht von selbst weiter.</p>
+  <p><a href="./" id="back" hidden>Zurück zu Impuls</a></p>
+</main>
+<script>
+// Rückkehrseite der Google-Anmeldung: legt den Token für die App ab und schließt sich wieder.
+(() => {
+  const P = 'impuls.';
+  const AUTH_VERSION = 2; // wie in app.js
+  const get = k => { try { return JSON.parse(localStorage.getItem(P + k)); } catch { return null; } };
+  const set = (k, v) => { try { localStorage.setItem(P + k, JSON.stringify(v)); } catch { /* Speicher gesperrt */ } };
+  const del = k => { try { localStorage.removeItem(P + k); } catch { /* Speicher gesperrt */ } };
+  const h = new URLSearchParams(location.hash.slice(1));
+  const err = h.get('error') || new URLSearchParams(location.search).get('error');
+  const msg = document.getElementById('msg');
+  let ok = false;
+
+  if (err) {
+    set('oauthError', err === 'access_denied' ? 'Die Anmeldung wurde abgebrochen oder abgelehnt.' : 'Google meldet: ' + err);
+    msg.textContent = 'Die Anmeldung hat nicht geklappt.';
+  } else if (!h.get('access_token') || h.get('state') !== get('oauthState')) {
+    msg.textContent = 'Diese Anmeldung passt nicht zur App. Bitte in Impuls noch einmal anmelden.';
+  } else {
+    set('token', { value: h.get('access_token'), exp: Date.now() + (+h.get('expires_in') || 3600) * 1000, scope: h.get('scope') || '', v: AUTH_VERSION });
+    set('consented', AUTH_VERSION);
+    del('oauthState');
+    ok = true;
+    msg.textContent = 'Angemeldet.';
+  }
+  history.replaceState(null, '', location.pathname); // Token nicht in der Adresszeile stehen lassen
+
+  const returnTo = get('returnTo');
+  del('returnTo');
+  if (ok && returnTo) { location.replace('./'); return; } // ganze Seite war umgeleitet: zurück zur App
+  if (window.opener) setTimeout(() => window.close(), 300);
+  setTimeout(() => {
+    if (ok) document.getElementById('hint').hidden = false;
+    document.getElementById('back').hidden = false;
+  }, 700);
+})();
+</script>
+</body>
+</html>

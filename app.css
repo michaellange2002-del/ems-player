@@ -352,3 +352,5 @@ h1,h2{text-wrap:balance}
 @media (prefers-reduced-motion: reduce){
   .pl-top,.pl-bottom{transition:none}
 }
+
+.login-err.info{color:var(--muted);font-weight:500}

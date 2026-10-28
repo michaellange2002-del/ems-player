@@ -144,55 +144,68 @@
     return `<span class="poster ${v.art || 'p-gen'}">${img}<span class="p-src${yt ? ' yt' : ''}">${yt ? 'YouTube' : 'Eigenes Video'}</span>${v.dur ? `<span class="p-dur">${fmt(v.dur)}</span>` : ''}${yt ? '' : `<span class="p-title">${esc(v.title)}</span>`}</span>`;
   }
 
-  /* ---------- Google-Anmeldung ---------- */
+  /* ---------- Google-Anmeldung ----------
+     Klassisches OAuth-Verfahren für Web-Apps (response_type=token) ohne Googles Anmeldebibliothek.
+     Google leitet nach der Anmeldung auf auth.html zurück; die Seite legt den Token im Speicher ab,
+     und die App übernimmt ihn von dort (auch wenn das Anmeldefenster in einem eigenen Tab lief). */
   const auth = {
-    token: null, exp: 0, scope: '', client: null, pending: null,
+    token: null, exp: 0, scope: '', pending: null,
     restore() {
       const t = store.get('token');
-      if (t && t.v === AUTH_VERSION && t.exp > Date.now() + 120e3) { this.token = t.value; this.exp = t.exp; this.scope = t.scope || ''; this.share(); }
+      if (t && t.v === AUTH_VERSION && t.exp > Date.now() + 120e3) { this.token = t.value; this.exp = t.exp; this.scope = t.scope || ''; this.share(); return true; }
+      return false;
     },
     valid(ms = 120e3) { return !!this.token && this.exp - Date.now() > ms; },
     has(s) { return this.scope.split(' ').includes(s); },
     share() { navigator.serviceWorker?.controller?.postMessage({ type: 'token', token: this.token }); },
-    ready: () => !!window.google?.accounts?.oauth2,
-    ensureClient() {
-      if (this.client) return true;
-      if (!this.ready()) return false;
-      this.client = google.accounts.oauth2.initTokenClient({
-        client_id: CFG.clientId,
-        scope: SCOPES.join(' '),
-        callback: r => this.done(r),
-        error_callback: e => this.fail(new Error(
-          e?.type === 'popup_closed' ? 'Das Anmeldefenster wurde geschlossen.'
-            : e?.type === 'popup_failed_to_open' ? 'Das Anmeldefenster wurde blockiert. Bitte Pop-ups für diese Seite erlauben.'
-              : 'Die Anmeldung wurde abgebrochen.')),
-      });
-      return true;
-    },
     // Muss direkt aus einem Tipp heraus aufgerufen werden, sonst blockiert der Browser das Anmeldefenster.
-    request(scope) {
+    request(scope = SCOPES.join(' ')) {
+      this.pending?.cancel();
+      const state = uid() + uid();
+      store.set('oauthState', state);
+      store.del('oauthError');
+      const params = new URLSearchParams({
+        client_id: CFG.clientId,
+        redirect_uri: new URL('auth.html', location.href).href,
+        response_type: 'token',
+        scope,
+        state,
+        ...(store.get('consented') !== AUTH_VERSION && { prompt: 'consent' }),
+      });
+      const url = 'https://accounts.google.com/o/oauth2/v2/auth?' + params;
       return new Promise((resolve, reject) => {
-        if (!this.ensureClient()) return reject(new Error('Die Google-Anmeldung lädt noch. Bitte gleich noch einmal tippen.'));
-        this.pending = { resolve, reject };
-        this.client.requestAccessToken({ prompt: store.get('consented') === AUTH_VERSION ? '' : 'consent', ...(scope && { scope }) });
+        const before = store.get('token')?.value;
+        const check = () => {
+          const t = store.get('token');
+          if (t && t.v === AUTH_VERSION && t.value !== before && t.exp > Date.now()) {
+            cleanup();
+            this.token = t.value; this.exp = t.exp; this.scope = t.scope || '';
+            this.share();
+            resolve();
+            return;
+          }
+          const err = store.get('oauthError');
+          if (err) { store.del('oauthError'); cleanup(); reject(new Error(err)); }
+        };
+        const onStorage = e => { if (e.key === PREFIX + 'token' || e.key === PREFIX + 'oauthError') check(); };
+        const timer = setInterval(check, 700);
+        const cleanup = () => {
+          clearInterval(timer);
+          window.removeEventListener('storage', onStorage);
+          window.removeEventListener('focus', check);
+          this.pending = null;
+        };
+        window.addEventListener('storage', onStorage);
+        window.addEventListener('focus', check);
+        this.pending = { cancel: () => { cleanup(); reject(Object.assign(new Error(''), { silent: true })); } };
+        const w = window.open(url, 'impuls-login', 'popup,width=480,height=680');
+        // Kein Fenster möglich: ganze Seite zu Google umleiten, auth.html springt danach zurück
+        if (!w) { store.set('returnTo', true); location.href = url; }
       });
     },
-    done(r) {
-      const p = this.pending;
-      this.pending = null;
-      if (r.error) return p?.reject(new Error(r.error_description || r.error));
-      this.token = r.access_token;
-      this.exp = Date.now() + (r.expires_in || 3600) * 1000;
-      this.scope = r.scope || SCOPES.join(' ');
-      store.set('token', { value: this.token, exp: this.exp, scope: this.scope, v: AUTH_VERSION });
-      store.set('consented', AUTH_VERSION);
-      this.share();
-      p?.resolve();
-    },
-    fail(e) { const p = this.pending; this.pending = null; p?.reject(e); },
     clear() { this.token = null; this.exp = 0; store.del('token'); },
     signOut() {
-      if (this.token && this.ready()) google.accounts.oauth2.revoke(this.token, () => {});
+      if (this.token) fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(this.token), { method: 'POST', mode: 'no-cors' }).catch(() => {});
       this.clear();
       store.del('consented');
     },
@@ -605,6 +618,7 @@
     $('#app').dataset.view = 'login';
     $('#loginErr').textContent = msg;
     $('#loginErr').hidden = !msg;
+    $('#loginErr').classList.remove('info');
   }
   function showApp() { $('#app').dataset.view = 'app'; }
   function openSheet(html) { $('#sheet').innerHTML = html; $('#sheetWrap').hidden = false; }
@@ -1061,9 +1075,13 @@
   });
 
   // Klappt die Anmeldung nicht, gibt es eine Anmeldung ohne Drive-Abgleich (nur Lesen wie in Version 1).
-  const login = scope => auth.request(scope)
-    .then(() => { showApp(); go('home'); loadAll(); })
-    .catch(e => { showLogin(e.message); $('#loginBasic').hidden = false; });
+  const login = scope => {
+    showLogin('Melde dich im Google-Fenster an. Danach geht es hier von selbst weiter.');
+    $('#loginErr').classList.add('info');
+    auth.request(scope)
+      .then(() => { showApp(); go('home'); loadAll(); })
+      .catch(e => { if (e.silent) return; showLogin(e.message); $('#loginBasic').hidden = false; });
+  };
   $('#loginBtn').onclick = () => login();
   $('#loginBasic').onclick = () => login([S_DRIVE_READ, S_YT].join(' '));
 
@@ -1111,10 +1129,13 @@
   } else if (!CFG.clientId) {
     showLogin('Die Client-ID fehlt in config.js.');
   } else {
-    const gis = setInterval(() => { if (auth.ensureClient()) clearInterval(gis); }, 150);
     auth.restore();
     const old = store.get('token');
     if (auth.valid()) { showApp(); go('home'); loadAll(); }
     else { render(); showLogin(old && old.v !== AUTH_VERSION ? 'Impuls darf jetzt deinen Verlauf in Google Drive speichern. Dafür brauchst du einmal eine neue Anmeldung.' : ''); }
+    // Anmeldung in einem anderen Fenster oder Tab abgeschlossen: hier übernehmen
+    window.addEventListener('focus', () => {
+      if ($('#app').dataset.view === 'login' && !auth.pending && auth.restore()) { showApp(); go('home'); loadAll(); }
+    });
   }
 })();
