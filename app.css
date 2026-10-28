@@ -19,8 +19,11 @@
 }
 
 *{box-sizing:border-box}
-html,body{height:100%;margin:0}
-body{background:var(--app-bg);color:var(--ink);font-family:var(--font-body);font-size:16px;line-height:1.45;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+html,body{margin:0}
+html{overscroll-behavior-y:none}
+body{background:var(--app-bg);color:var(--ink);font-family:var(--font-body);font-size:16px;line-height:1.45;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+/* Liegt Player oder ein Blatt darüber, scrollt die Seite dahinter nicht mit */
+body:has(.player:not([hidden])),body:has(.sheet-wrap:not([hidden])){overflow:hidden}
 button,input{font:inherit;color:inherit}
 button{cursor:pointer}
 a{color:var(--accent)}
@@ -34,14 +37,15 @@ h1,h2{text-wrap:balance}
 .sub{color:var(--muted)}
 .small{font-size:13px}
 
-/* Grundgerüst */
-.app{height:100vh;height:100dvh;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto;overflow:hidden}
+/* Grundgerüst: die Seite selbst scrollt, die Navigation ist fest am Bildschirmrand verankert.
+   So bleibt sie sichtbar, auch wenn Chrome beim Scrollen die Adressleiste ein- und ausblendet. */
+.app{min-height:100vh;min-height:100dvh}
 .app[data-view="login"] .nav,.app[data-view="login"] .main{display:none}
 .app[data-view="app"] .login{display:none}
 .a-head > div{min-width:0}
 
 /* Anmeldung */
-.login{display:grid;place-items:center;overflow-y:auto;padding:calc(24px + env(safe-area-inset-top,0px)) max(20px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) max(20px,env(safe-area-inset-left,0px))}
+.login{display:grid;place-items:center;min-height:100vh;min-height:100dvh;padding:calc(24px + env(safe-area-inset-top,0px)) max(20px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) max(20px,env(safe-area-inset-left,0px))}
 .login-box{width:min(440px,100%);display:grid;gap:18px}
 .login-logo{display:flex;align-items:center;gap:.14em;font-family:var(--font-display);font-stretch:68%;font-weight:850;font-size:72px;line-height:.85;text-transform:uppercase}
 .login-logo svg,.brand svg{fill:none;stroke:var(--accent);stroke-width:2.6;stroke-linecap:square;stroke-linejoin:miter}
@@ -51,12 +55,12 @@ h1,h2{text-wrap:balance}
 .login .btn-primary{justify-self:start}
 
 /* Navigation */
-.nav{order:2;display:flex;justify-content:space-around;background:var(--app-card);border-top:1px solid var(--app-line);padding:6px max(8px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px))}
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:15;display:flex;justify-content:space-around;background:var(--app-card);border-top:1px solid var(--app-line);padding:6px max(8px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px))}
 .brand,.nav-space{display:none}
 .nav-btn{display:grid;justify-items:center;gap:2px;background:none;border:0;padding:6px 10px;border-radius:12px;font-size:11.5px;font-weight:600;color:var(--muted);min-width:64px}
 .nav-btn .ico{width:24px;height:24px}
 .nav-btn[aria-current="page"]{color:var(--accent)}
-.main{overflow-y:auto;min-height:0;padding:calc(18px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 28px max(16px,env(safe-area-inset-left,0px))}
+.main{padding:calc(18px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(100px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
 .scr{display:grid;gap:16px;align-content:start;max-width:1240px;margin:0 auto}
 
 /* Kopf und Grundbausteine */
@@ -227,7 +231,7 @@ h1,h2{text-wrap:balance}
 
 /* Blätter (Abschluss, Einstellungen) */
 .sheet-wrap{position:fixed;inset:0;z-index:30;background:var(--scrim);display:flex;align-items:flex-end}
-.sheet{background:var(--app-card);color:var(--ink);width:100%;max-height:88%;overflow-y:auto;border-radius:24px 24px 0 0;padding:22px max(18px,env(safe-area-inset-right,0px)) calc(26px + env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px));display:grid;gap:14px}
+.sheet{background:var(--app-card);color:var(--ink);width:100%;max-height:88%;overflow-y:auto;overscroll-behavior:contain;border-radius:24px 24px 0 0;padding:22px max(18px,env(safe-area-inset-right,0px)) calc(26px + env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px));display:grid;gap:14px}
 .sheet-title{font-family:var(--font-display);font-stretch:74%;font-weight:800;font-size:26px;line-height:1.02;text-transform:uppercase}
 .set-list{display:grid;gap:4px}
 .set-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--app-line)}
@@ -269,15 +273,13 @@ h1,h2{text-wrap:balance}
 
 /* Tablet */
 @media (min-width:700px){
-  .app{grid-template-columns:100px minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
-  .app[data-view="login"]{grid-template-columns:1fr}
-  .nav{order:0;flex-direction:column;justify-content:flex-start;gap:6px;border-top:0;border-right:1px solid var(--app-line);padding:calc(24px + env(safe-area-inset-top,0px)) 10px calc(16px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px))}
+  .nav{top:0;right:auto;width:calc(100px + env(safe-area-inset-left,0px));overflow-y:auto;flex-direction:column;justify-content:flex-start;gap:6px;border-top:0;border-right:1px solid var(--app-line);padding:calc(24px + env(safe-area-inset-top,0px)) 10px calc(16px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px))}
   .brand{display:grid;justify-items:center;gap:4px;margin-bottom:20px;font-family:var(--font-display);font-stretch:70%;font-weight:850;font-size:15px;text-transform:uppercase;letter-spacing:.02em}
   .brand svg{width:30px;height:30px}
   .nav-space{display:block;flex:1}
   .nav-btn{width:100%;padding:12px 4px;font-size:12px;min-width:0}
   .nav-btn[aria-current="page"]{background:var(--accent-soft)}
-  .main{padding:calc(30px + env(safe-area-inset-top,0px)) max(34px,env(safe-area-inset-right,0px)) 34px 34px}
+  .main{margin-left:calc(100px + env(safe-area-inset-left,0px));padding:calc(30px + env(safe-area-inset-top,0px)) max(34px,env(safe-area-inset-right,0px)) calc(34px + env(safe-area-inset-bottom,0px)) 34px}
   .a-title{font-size:38px}
   .home-grid{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);grid-template-areas:"next week" "next streak" "check check"}
   .next{grid-area:next}

@@ -659,11 +659,13 @@
      Unter der Startseite liegt der erste Eintrag der Seite: Wer dort landet, bekommt einen Hinweis,
      erst der nächste Druck auf Zurück schließt die App. */
   const ensureBase = () => { if (!history.state) history.pushState({ v: 'home' }, ''); };
+  history.scrollRestoration = 'manual'; // Scrollen steuert die App selbst
   function showView(view) {
+    const changed = state.view !== view;
     state.view = view;
     $$('[data-s]').forEach(el => { el.hidden = el.dataset.s !== view; });
     $$('.nav-btn[data-go]').forEach(b => (b.dataset.go === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current')));
-    $('#main').scrollTop = 0;
+    if (changed) window.scrollTo(0, 0); // Blatt schließen lässt die Position, wo sie war
   }
   function go(view) {
     ensureBase();
