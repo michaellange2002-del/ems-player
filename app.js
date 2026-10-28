@@ -20,6 +20,20 @@
   const DEFAULT_GROUPS = ['Schulter', 'Oberer Rücken', 'Mittlerer Rücken', 'Unterer Rücken', 'Hinterer OS', 'Gesäß', 'Vorderer OS', 'Bauch Innen', 'Bauch Außen', 'Brust', 'Bizeps', 'Trizeps'];
   // Erster Vorschlag aus Version 2; wird automatisch ersetzt, solange er nicht von Hand geändert wurde
   const OLD_DEFAULT_GROUPS = ['Oberschenkel vorn', 'Oberschenkel hinten', 'Gesäß', 'Bauch', 'Unterer Rücken', 'Latissimus', 'Brust', 'Schultern', 'Bizeps', 'Trizeps'];
+  // Körperwerte: Gewicht in kg, Körperfett in %, Umfänge in cm. pair = links/rechts in einer Zeile.
+  const MEASURES = [
+    { k: 'weight', name: 'Gewicht', unit: 'kg', lo: 20, hi: 300 },
+    { k: 'fat', name: 'Körperfett', unit: '%', lo: 2, hi: 70, hint: 'falls deine Waage das misst' },
+    { k: 'chest', name: 'Brust', unit: 'cm', lo: 30, hi: 250 },
+    { k: 'waist', name: 'Bauch', unit: 'cm', lo: 30, hi: 250, hint: 'auf Höhe des Bauchnabels' },
+    { k: 'hip', name: 'Hüfte', unit: 'cm', lo: 30, hi: 250 },
+    { k: 'armL', name: 'Bizeps links', unit: 'cm', lo: 10, hi: 100, pair: 'Bizeps' },
+    { k: 'armR', name: 'Bizeps rechts', unit: 'cm', lo: 10, hi: 100, pair: 'Bizeps' },
+    { k: 'thighL', name: 'Oberschenkel links', unit: 'cm', lo: 20, hi: 150, pair: 'Oberschenkel' },
+    { k: 'thighR', name: 'Oberschenkel rechts', unit: 'cm', lo: 20, hi: 150, pair: 'Oberschenkel' },
+    { k: 'calfL', name: 'Wade links', unit: 'cm', lo: 15, hi: 100, pair: 'Wade' },
+    { k: 'calfR', name: 'Wade rechts', unit: 'cm', lo: 15, hi: 100, pair: 'Wade' },
+  ];
 
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -69,7 +83,8 @@
   /* ---------- Daten: Verlauf, Kategorien, Einstellungen ----------
      Liegen lokal und als Impuls-Daten.json in Google Drive. Positionen zum Fortsetzen bleiben pro Gerät. */
   // plan: feste Trainingstage (0 = So … 6 = Sa) und Uhrzeit für den Kalender
-  const defaults = () => ({ goal: CFG.weeklyGoal || 2, rest: CFG.minRestDays ?? 2, groups: DEFAULT_GROUPS, plan: { days: [], time: '18:00' } });
+  // height: Körpergröße in cm für den BMI
+  const defaults = () => ({ goal: CFG.weeklyGoal || 2, rest: CFG.minRestDays ?? 2, groups: DEFAULT_GROUPS, plan: { days: [], time: '18:00' }, height: null });
   const db = {
     data: null,
     load() {
@@ -86,6 +101,7 @@
       }
       d.settings = { ...defaults(), ...d.settings };
       d.prefs = { fav: {}, hidden: {}, ...d.prefs };
+      d.body = d.body || [];
       if (JSON.stringify(d.settings.groups) === JSON.stringify(OLD_DEFAULT_GROUPS)) {
         d.settings.groups = DEFAULT_GROUPS;
         d.setT = Date.now(); // damit der Abgleich die neue Liste auch auf die anderen Geräte bringt
@@ -97,6 +113,21 @@
     addSession(s) { this.data.sessions.push({ id: uid(), t: Date.now(), ...s }); this.save(); sync.soon(); },
     deleteSession(id) {
       this.data.sessions = this.data.sessions.filter(s => s.id !== id);
+      this.data.deleted.push(id);
+      this.save();
+      sync.soon();
+    },
+    // Körperwerte { id, t, d, m: { weight: 84.2, waist: 92 } }. Ändern = alte Messung löschen, neue anlegen,
+    // so führt der Abgleich Änderungen genauso zusammen wie neue Einheiten.
+    saveBody(entry, replaceId) {
+      if (replaceId) { this.data.body = this.data.body.filter(b => b.id !== replaceId); this.data.deleted.push(replaceId); }
+      this.data.body.push({ id: uid(), t: Date.now(), ...entry });
+      this.data.body.sort(byDay);
+      this.save();
+      sync.soon();
+    },
+    deleteBody(id) {
+      this.data.body = this.data.body.filter(b => b.id !== id);
       this.data.deleted.push(id);
       this.save();
       sync.soon();
@@ -122,6 +153,8 @@
   const allSessions = () => db.data.sessions;
   const lastOf = key => { const a = allSessions(); for (let i = a.length - 1; i >= 0; i--) if (a[i].key === key) return a[i]; return null; };
   const countOf = key => allSessions().filter(s => s.key === key).length;
+  const byDay = (x, y) => (x.d < y.d ? -1 : x.d > y.d ? 1 : x.t - y.t);
+  const allBody = () => db.data.body;
   const lastWithInts = () => { const a = allSessions(); for (let i = a.length - 1; i >= 0; i--) if (a[i].ints && Object.keys(a[i].ints).length) return a[i]; return null; };
   // Einheiten pro Woche für die letzten n Wochen, die letzte ist die aktuelle
   function weekCounts(n) {
@@ -265,6 +298,8 @@
     const gone = new Set(deleted);
     const byId = new Map();
     for (const s of [...(b.sessions || []), ...(a.sessions || [])]) if (s?.id && !gone.has(s.id)) byId.set(s.id, s);
+    const bodyById = new Map();
+    for (const m of [...(b.body || []), ...(a.body || [])]) if (m?.id && !gone.has(m.id)) bodyById.set(m.id, m);
     const aCat = (a.catT || 0) >= (b.catT || 0);
     const aSet = (a.setT || 0) >= (b.setT || 0);
     const aYt = (a.ytT || 0) >= (b.ytT || 0);
@@ -272,6 +307,7 @@
     return {
       version: 1,
       sessions: [...byId.values()].sort((x, y) => x.t - y.t),
+      body: [...bodyById.values()].sort(byDay),
       deleted,
       categories: (aCat ? a.categories : b.categories) || {},
       catT: Math.max(a.catT || 0, b.catT || 0),
@@ -283,7 +319,7 @@
       prefT: Math.max(a.prefT || 0, b.prefT || 0),
     };
   }
-  const fingerprint = d => JSON.stringify([(d.sessions || []).map(s => s.id).sort(), [...(d.deleted || [])].sort(), d.catT || 0, d.setT || 0, d.ytT || 0, d.prefT || 0]);
+  const fingerprint = d => JSON.stringify([(d.sessions || []).map(s => s.id).sort(), (d.body || []).map(b => b.id).sort(), [...(d.deleted || [])].sort(), d.catT || 0, d.setT || 0, d.ytT || 0, d.prefT || 0]);
   const isFav = key => !!db.data.prefs?.fav?.[key];
   const isHidden = key => !!db.data.prefs?.hidden?.[key];
 
@@ -362,7 +398,7 @@
   }
 
   /* ---------- Videos laden ---------- */
-  const state = { sugIndex: 0, skipResume: false, view: 'home', filter: 'Alle', videos: [], driveVideos: [], demoYt: null, drive: 'idle', driveErr: '', ytLoading: false, ytErr: null, folderId: null, install: null, editCats: false, trendGroup: null, sheet: null };
+  const state = { sugIndex: 0, skipResume: false, view: 'home', filter: 'Alle', videos: [], driveVideos: [], demoYt: null, drive: 'idle', driveErr: '', ytLoading: false, ytErr: null, folderId: null, install: null, editCats: false, trendGroup: null, sheet: null, histTab: 'train', bodyKey: null };
 
   async function loadDrive() {
     const name = (CFG.folderName || 'EMS Training').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -656,26 +692,43 @@
   }
 
   /* ---------- Verlauf ---------- */
-  function chart(pts) {
-    if (pts.length < 2) return `<p class="sub">${pts.length ? `Bisher ein Wert: ${pts[0].v}. Ab der zweiten Einheit siehst du hier den Verlauf.` : 'Noch keine Werte.'}</p>`;
+  // o.fine: feineres Raster für Körperwerte (kleine Änderungen sollen sichtbar sein), o.fmt: Zahlen formatieren
+  function chart(pts, o = {}) {
+    const f = o.fmt || (v => v);
+    if (pts.length < 2) return `<p class="sub">${pts.length ? o.one || `Bisher ein Wert: ${pts[0].v}. Ab der zweiten Einheit siehst du hier den Verlauf.` : 'Noch keine Werte.'}</p>`;
     const vals = pts.map(p => p.v);
-    let lo = Math.max(0, Math.floor((Math.min(...vals) - 2) / 5) * 5);
-    let hi = Math.ceil((Math.max(...vals) + 2) / 5) * 5;
-    if (hi - lo < 10) hi = lo + 10;
-    const step = hi - lo > 30 ? 10 : 5;
-    const W = 440, H = 150, L = 30, R = 34, T = 14, B = 24;
+    const mn = Math.min(...vals), mx = Math.max(...vals);
+    let lo, hi, step;
+    if (o.fine) {
+      step = [0.5, 1, 2, 5, 10, 20].find(s => (mx - mn) / s <= 4) || 50;
+      lo = Math.max(0, Math.floor(mn / step - 0.5) * step);
+      hi = Math.ceil(mx / step + 0.5) * step;
+    } else {
+      lo = Math.max(0, Math.floor((mn - 2) / 5) * 5);
+      hi = Math.ceil((mx + 2) / 5) * 5;
+      if (hi - lo < 10) hi = lo + 10;
+      step = hi - lo > 30 ? 10 : 5;
+    }
+    const W = 440, H = 150, L = 30, R = o.fine ? 46 : 34, T = 14, B = 24;
     const x = i => L + i * (W - L - R) / (pts.length - 1);
     const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
     const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.v).toFixed(1)}`).join(' ');
     const area = `${line} L${x(pts.length - 1).toFixed(1)} ${H - B} L${x(0).toFixed(1)} ${H - B} Z`;
     let grid = '';
-    for (let t = lo; t <= hi; t += step) grid += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"/><text x="${L - 6}" y="${(y(t) + 3.5).toFixed(1)}" text-anchor="end">${t}</text>`;
+    for (let t = lo; t <= hi + 1e-9; t += step) grid += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"/><text x="${L - 6}" y="${(y(t) + 3.5).toFixed(1)}" text-anchor="end">${f(t)}</text>`;
     const last = pts[pts.length - 1];
     const dots = pts.slice(0, -1).map((p, i) => `<circle class="pt" cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3"/>`).join('');
-    return `<svg class="trend-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Verlauf von ${pts[0].v} auf ${last.v}">${grid}<path class="area" d="${area}"/><path class="line" d="${line}"/>${dots}<circle class="end" cx="${x(pts.length - 1).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="5"/><text class="val" x="${(x(pts.length - 1) + 9).toFixed(1)}" y="${(y(last.v) + 4).toFixed(1)}">${last.v}</text><text x="${x(0)}" y="${H - 6}">${fmtDay(pts[0].d)}</text><text x="${x(pts.length - 1)}" y="${H - 6}" text-anchor="end">${fmtDay(last.d)}</text></svg>`;
+    return `<svg class="trend-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Verlauf von ${f(pts[0].v)} auf ${f(last.v)}">${grid}<path class="area" d="${area}"/><path class="line" d="${line}"/>${dots}<circle class="end" cx="${x(pts.length - 1).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="5"/><text class="val" x="${(x(pts.length - 1) + 9).toFixed(1)}" y="${(y(last.v) + 4).toFixed(1)}">${f(last.v)}</text><text x="${x(0)}" y="${H - 6}">${fmtDay(pts[0].d)}</text><text x="${x(pts.length - 1)}" y="${H - 6}" text-anchor="end">${fmtDay(last.d)}</text></svg>`;
   }
 
+  // Kopf des Verlaufs mit Umschalter Training ↔ Körperwerte
+  const histHead = sub => `
+      <header class="a-head"><div><p class="a-date">${sub}</p><h1 class="a-title">Verlauf</h1></div>${state.histTab === 'body' && allBody().length ? '<button class="btn-primary small-btn" data-act="bodyAdd">Werte eintragen</button>' : ''}</header>
+      <div class="seg" role="group" aria-label="Verlauf anzeigen"><button data-act="histTab" data-tab="train" aria-pressed="${state.histTab !== 'body'}">Training</button><button data-act="histTab" data-tab="body" aria-pressed="${state.histTab === 'body'}">Körperwerte</button></div>
+      <p class="sync-line" id="syncLine" data-s="${sync.status}"><i></i><span id="syncText">${esc(sync.text())}</span>${DEMO ? '' : (sync.status === 'off' && auth.valid(0) ? '<button class="btn-ghost small-btn" data-act="relogin">Neu anmelden</button>' : '<button class="btn-ghost small-btn" data-act="syncNow">Jetzt abgleichen</button>')}</p>`;
+
   function renderHist() {
+    if (state.histTab === 'body') return renderBody();
     const all = allSessions();
     const { c, start } = weekCounts(12);
     const avg = (c.reduce((a, b) => a + b, 0) / 12).toFixed(1).replace('.', ',');
@@ -705,9 +758,7 @@
 
     const list = all.slice(-15).reverse().map(s => `<li><button class="s-row" data-act="session" data-id="${esc(s.id)}"><span class="s-date">${fmtDay(fromKey(s.d))}</span><span class="s-title">${esc(s.title)}</span><span class="s-min">${mins(s.sec)} Min.</span>${s.feel != null ? `<span class="s-feel f${s.feel}">${FEEL[s.feel]}</span>` : ''}${s.ints ? `<span class="s-int">${Object.entries(s.ints).slice(0, 3).map(([k, n]) => `${esc(k)} ${n}`).join(' · ')}</span>` : ''}</button></li>`).join('');
 
-    $('#hist').innerHTML = `
-      <header class="a-head"><div><p class="a-date">Letzte 12 Wochen</p><h1 class="a-title">Verlauf</h1></div></header>
-      <p class="sync-line" id="syncLine" data-s="${sync.status}"><i></i><span id="syncText">${esc(sync.text())}</span>${DEMO ? '' : (sync.status === 'off' && auth.valid(0) ? '<button class="btn-ghost small-btn" data-act="relogin">Neu anmelden</button>' : '<button class="btn-ghost small-btn" data-act="syncNow">Jetzt abgleichen</button>')}</p>
+    $('#hist').innerHTML = `${histHead('Letzte 12 Wochen')}
       <div class="stats"><div class="stat"><b>${all.length}</b><span>Einheiten</span></div><div class="stat"><b>${avg}</b><span>Ø pro Woche</span></div><div class="stat"><b>${h} h ${m}</b><span>Minuten Training</span></div></div>
       <div class="hist-grid">
         <article class="card"><p class="label">Trainingstage</p><div class="cal">${cal}</div></article>
@@ -735,6 +786,153 @@
       ${buttons}`);
   }
 
+  /* ---------- Körperwerte ---------- */
+  const num = v => v.toLocaleString('de-DE', { maximumFractionDigits: 1 });
+  const signed = v => (Math.abs(v) < 0.05 ? '±0' : (v > 0 ? '+' : '−') + Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+  const measure = k => MEASURES.find(m => m.k === k);
+  const height = () => db.data.settings.height;
+  const bmiOf = w => (height() && w ? Math.round(w / (height() / 100) ** 2 * 10) / 10 : null);
+  const bmiClass = b => (b < 18.5 ? 'Untergewicht' : b < 25 ? 'Normalgewicht' : b < 30 ? 'Übergewicht' : 'Adipositas');
+  const bodyName = k => (k === 'bmi' ? 'BMI' : measure(k).name);
+  const bodyUnit = k => (k === 'bmi' ? '' : measure(k).unit);
+  // Verlauf eines Werts; „bmi“ wird aus Gewicht und Körpergröße berechnet
+  const seriesOf = k => allBody().map(b => ({ d: fromKey(b.d), v: k === 'bmi' ? bmiOf(b.m.weight) : b.m[k] })).filter(p => p.v != null);
+  const latestOf = k => seriesOf(k).at(-1) || null;
+
+  function renderBody() {
+    const all = allBody();
+    if (!all.length) {
+      $('#hist').innerHTML = `${histHead('Gewicht, Umfänge, BMI')}
+        <article class="card body-empty"><p class="label">Körperwerte</p><h2 class="next-title">Miss dich alle ein bis zwei Wochen</h2>
+          <p class="sub">Gewicht und Umfänge an Brust, Bauch, Armen und Beinen, dazu einmal deine Körpergröße. Impuls rechnet daraus den BMI und zeigt dir, wie sich alles entwickelt.</p>
+          <div class="btn-row"><button class="btn-primary" data-act="bodyAdd">Erste Werte eintragen</button></div></article>`;
+      return;
+    }
+    const keys = MEASURES.map(m => m.k).filter(k => seriesOf(k).length);
+    if (height() && keys.includes('weight')) keys.splice(1, 0, 'bmi');
+    if (!keys.includes(state.bodyKey)) state.bodyKey = keys[0];
+    const change = k => { const s = seriesOf(k); return s.length > 1 ? s.at(-1).v - s[0].v : null; };
+    const tile = (k, label) => {
+      const p = latestOf(k), c = change(k);
+      return `<div class="stat"><b>${p ? num(p.v) : '–'}</b><span>${label}</span>${c != null ? `<small class="delta">${signed(c)} seit Beginn</small>` : ''}</div>`;
+    };
+    const w = latestOf('weight'), waist = latestOf('waist');
+    const bmi = w && bmiOf(w.v);
+    const bmiTile = bmi
+      ? `<div class="stat"><b>${num(bmi)}</b><span>BMI</span><small class="delta">${bmiClass(bmi)}</small></div>`
+      : `<div class="stat"><b>–</b><span>BMI</span><small class="delta">${height() ? 'Gewicht fehlt' : 'Größe fehlt'}</small></div>`;
+
+    const k = state.bodyKey;
+    const trend = `<div class="chips small">${keys.map(x => `<button data-act="bodyTrend" data-k="${x}" aria-pressed="${x === k}">${esc(bodyName(x))}</button>`).join('')}</div>
+      ${chart(seriesOf(k).slice(-20), { fine: true, fmt: num, one: `Bisher eine Messung: ${num(latestOf(k).v)} ${bodyUnit(k)}. Ab der zweiten siehst du hier den Verlauf.` })}`;
+
+    const rows = MEASURES.filter(m => latestOf(m.k)).map(m => {
+      const c = change(m.k);
+      return `<span>${esc(m.name)}</span><b>${num(latestOf(m.k).v)} ${m.unit}</b><small>${c != null ? signed(c) : ''}</small>`;
+    }).join('');
+
+    // BMI-Skala von 15 bis 40, Grenzen nach WHO
+    const at = v => clamp((v - 15) / 25 * 100, 0, 100);
+    const ratio = waist && height() ? waist.v / height() : null;
+    const judge = bmi
+      ? `<div class="bmi"><div class="bmi-head"><b>${num(bmi)}</b><span>${bmiClass(bmi)}</span></div>
+          <div class="bmi-scale" role="img" aria-label="BMI ${num(bmi)}, ${bmiClass(bmi)}"><i class="u"></i><i class="n"></i><i class="o"></i><i class="a"></i><b style="left:${at(bmi).toFixed(1)}%"></b></div>
+          <div class="bmi-ticks"><span style="left:${at(18.5)}%">18,5</span><span style="left:${at(25)}%">25</span><span style="left:${at(30)}%">30</span></div></div>
+        <p class="sub small">Normal sind 18,5 bis 24,9. Muskeln sind schwerer als Fett: Wer viel trainiert, liegt beim BMI oft höher, ohne zu viel Fett zu haben.</p>`
+      : `<p class="sub">${height() ? 'Trag dein Gewicht ein, dann rechnet Impuls deinen BMI aus.' : 'Trag einmal deine Körpergröße ein, dann rechnet Impuls deinen BMI aus.'}</p>`;
+    const ratioTxt = ratio
+      ? `<div class="kv"><span>Bauch geteilt durch Größe</span><b>${ratio.toFixed(2).replace('.', ',')}</b></div><p class="sub small">Richtwert: unter 0,5, also Bauchumfang höchstens halb so groß wie die Körpergröße. Sagt mehr über das Bauchfett als der BMI.</p>`
+      : '';
+
+    const list = all.slice(-20).reverse().map(b => {
+      const ks = MEASURES.filter(m => b.m[m.k] != null);
+      const [first, ...rest] = ks;
+      const more = rest.slice(0, 4).map(m => `${m.name} ${num(b.m[m.k])}`).join(' · ');
+      return `<li><button class="s-row" data-act="bodyEdit" data-id="${esc(b.id)}"><span class="s-date">${fmtDay(fromKey(b.d))}</span><span class="s-title">${first.k === 'weight' ? '' : esc(first.name) + ' '}${num(b.m[first.k])} ${first.unit}</span><span class="s-min">${ks.length} ${ks.length === 1 ? 'Wert' : 'Werte'}</span>${more ? `<span class="s-int">${esc(more)}</span>` : ''}</button></li>`;
+    }).join('');
+
+    $('#hist').innerHTML = `${histHead(`${all.length} ${all.length === 1 ? 'Messung' : 'Messungen'} seit ${fmtDay(fromKey(all[0].d))}`)}
+      <div class="stats">${tile('weight', 'kg Gewicht')}${bmiTile}${tile('waist', 'cm Bauch')}</div>
+      <div class="hist-grid body-grid">
+        <article class="card"><p class="label">${esc(bodyName(k))}${bodyUnit(k) ? ` in ${bodyUnit(k)}` : ''} · letzte 20 Messungen</p>${trend}</article>
+        <article class="card body-vals"><p class="label">Aktuelle Werte · Änderung seit Beginn</p><div class="kv kv3">${rows}</div></article>
+        <article class="card"><p class="label">Einordnung${height() ? ` · ${num(height())} cm groß` : ''}</p>${judge}${ratioTxt}${height() ? '' : '<div class="btn-row"><button class="btn-ghost" data-act="bodyAdd" data-focus="height">Größe eintragen</button></div>'}</article>
+        <article class="card list-card"><p class="label">Messungen</p><ol class="sess">${list}</ol></article>
+      </div>`;
+  }
+
+  function openBody(id = null, confirm = false) {
+    const e = id ? allBody().find(b => b.id === id) : null;
+    if (id && !e) return closeSheet();
+    state.sheet = 'body';
+    // Grau im Feld steht der zuletzt gemessene Wert
+    const field = m => {
+      const last = latestOf(m.k);
+      return `<input type="text" inputmode="decimal" maxlength="5" enterkeyhint="next" autocomplete="off" data-m="${m.k}" value="${e?.m[m.k] != null ? num(e.m[m.k]) : ''}" placeholder="${last ? num(last.v) : '–'}" aria-label="${esc(m.name)} in ${m.unit}">`;
+    };
+    const row = m => (m.pair
+      ? `<div class="bf-row"><span>${esc(m.pair)}</span><span class="bf-in"><label><small>L</small>${field(m)}</label><label><small>R</small>${field(measure(m.k.slice(0, -1) + 'R'))}</label><em>cm</em></span></div>`
+      : `<div class="bf-row"><span>${esc(m.name)}${m.hint ? `<small>${esc(m.hint)}</small>` : ''}</span><span class="bf-in">${field(m)}<em>${m.unit}</em></span></div>`);
+    const rows = list => list.filter(m => !m.pair || m.k.endsWith('L')).map(row).join('');
+    const today = dayKey(new Date());
+    const buttons = confirm
+      ? `<p class="sub">Diese Messung wirklich löschen? Sie verschwindet auch auf deinen anderen Geräten.</p><div class="btn-row"><button class="btn-danger" data-act="bodyDelete" data-id="${esc(id)}">Ja, löschen</button><button class="btn-ghost" data-act="bodyEdit" data-id="${esc(id)}">Abbrechen</button></div>`
+      : `<div class="btn-row"><button class="btn-primary" data-act="bodySave" data-id="${esc(id || '')}">${icon('i-check')}Speichern</button><button class="btn-ghost" data-act="closeSheet">Abbrechen</button>${e ? `<button class="btn-ghost danger" data-act="bodyAskDelete" data-id="${esc(id)}">Löschen</button>` : ''}</div>`;
+    openSheet(`
+      <p class="label">Körperwerte</p>
+      <h2 class="sheet-title">${e ? 'Messung ändern' : 'Werte eintragen'}</h2>
+      <p class="sub small">Trag nur ein, was du gemessen hast. Grau steht dein letzter Wert. Am besten morgens vor dem Frühstück messen, immer an derselben Stelle.</p>
+      <label class="time-lbl" for="bDate">Datum <input type="date" id="bDate" value="${e ? e.d : today}" max="${today}"></label>
+      <div class="bform">
+        ${rows(MEASURES.slice(0, 2))}
+        <p class="q">Umfang in cm<span>Maßband straff anlegen, ohne einzuschnüren.</span></p>
+        ${rows(MEASURES.slice(2))}
+        <p class="q">Körpergröße<span>Für den BMI. Einmal eintragen reicht.</span></p>
+        <div class="bf-row"><span>Größe</span><span class="bf-in"><input type="text" inputmode="decimal" maxlength="5" enterkeyhint="done" autocomplete="off" data-m="height" value="${height() ? num(height()) : ''}" placeholder="–" aria-label="Körpergröße in cm"><em>cm</em></span></div>
+      </div>
+      ${buttons}`);
+    $('#sheet').scrollTop = 0;
+  }
+
+  function saveBody(id) {
+    const m = {};
+    let h = null;
+    for (const inp of $$('#sheet input[data-m]')) {
+      const raw = inp.value.trim().replace(',', '.');
+      if (raw === '') continue;
+      const def = inp.dataset.m === 'height' ? { name: 'Körpergröße', lo: 100, hi: 250 } : measure(inp.dataset.m);
+      const v = +raw;
+      if (!Number.isFinite(v) || v < def.lo || v > def.hi) { inp.focus(); return toast(`${def.name}: bitte prüfen (${def.lo} bis ${def.hi})`); }
+      if (inp.dataset.m === 'height') h = Math.round(v * 10) / 10;
+      else m[inp.dataset.m] = Math.round(v * 10) / 10;
+    }
+    const d = $('#bDate').value || dayKey(new Date());
+    if (d > dayKey(new Date())) return toast('Das Datum liegt in der Zukunft');
+    if (!Object.keys(m).length && !h) return toast('Bitte mindestens einen Wert eintragen');
+    if (h && h !== height()) db.setSettings({ height: h });
+    if (Object.keys(m).length) db.saveBody({ d, m }, id || null);
+    closeSheet();
+    renderHist();
+    toast(!Object.keys(m).length ? 'Körpergröße gespeichert' : id ? 'Messung geändert' : 'Körperwerte gespeichert');
+  }
+  // Werte eintippen: Ziffern und ein Komma, „Weiter“ springt zum nächsten Feld
+  const sheetEl = $('#sheet');
+  sheetEl.addEventListener('input', e => {
+    if (e.target.matches('input[data-m]')) e.target.value = e.target.value.replace(/\./g, ',').replace(/[^\d,]/g, '').replace(/(,.*),/g, '$1');
+  });
+  sheetEl.addEventListener('focusin', e => {
+    if (!e.target.matches('input[data-m]')) return;
+    const inp = e.target;
+    setTimeout(() => { inp.select(); inp.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 50);
+  });
+  sheetEl.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || !e.target.matches('input[data-m]')) return;
+    e.preventDefault();
+    const all = $$('#sheet input[data-m]');
+    const next = all[all.indexOf(e.target) + 1];
+    if (next) next.focus(); else e.target.blur();
+  });
+
   function render() {
     state.videos = [...state.driveVideos, ...ytVideos()];
     applyTags();
@@ -753,7 +951,7 @@
   function showView(view) {
     const changed = state.view !== view;
     state.view = view;
-    $$('[data-s]').forEach(el => { el.hidden = el.dataset.s !== view; });
+    $$('.scr[data-s]').forEach(el => { el.hidden = el.dataset.s !== view; }); // nur die Seiten, die Sync-Zeile nutzt data-s für ihren Status
     $$('.nav-btn[data-go]').forEach(b => (b.dataset.go === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current')));
     if (changed) window.scrollTo(0, 0); // Blatt schließen lässt die Position, wo sie war
   }
@@ -1214,7 +1412,7 @@
         ${state.install ? '<div class="set-row"><div><b>Als App installieren</b><span class="sub">Impuls auf den Startbildschirm legen</span></div><button class="btn-ghost" data-act="install">Installieren</button></div>' : ''}
         <div class="set-row"><div><b>Test-Player</b><span class="sub">Prüft das Abspielen auf diesem Gerät</span></div><a class="btn-ghost" href="test.html">Öffnen</a></div>
       </div>
-      <p class="sub small">Impuls · Version 2</p>
+      <p class="sub small">Impuls · Version 2.1</p>
       <div class="btn-row"><button class="btn-ghost" data-act="closeSheet">Schließen</button></div>`);
   }
 
@@ -1281,6 +1479,16 @@
     session: t => openSession(t.dataset.id),
     askDelete: t => openSession(t.dataset.id, true),
     deleteSession: t => { db.deleteSession(t.dataset.id); closeSheet(); render(); toast('Einheit gelöscht'); },
+    histTab: t => { state.histTab = t.dataset.tab; renderHist(); },
+    bodyTrend: t => { state.bodyKey = t.dataset.k; renderHist(); },
+    bodyAdd(t) {
+      openBody();
+      if (t.dataset.focus) $(`#sheet input[data-m="${t.dataset.focus}"]`)?.focus();
+    },
+    bodyEdit: t => openBody(t.dataset.id),
+    bodySave: t => saveBody(t.dataset.id),
+    bodyAskDelete: t => openBody(t.dataset.id, true),
+    bodyDelete: t => { db.deleteBody(t.dataset.id); closeSheet(); renderHist(); toast('Messung gelöscht'); },
     async install() {
       const e = state.install;
       if (!e) return;
@@ -1356,6 +1564,19 @@
           i++;
         }
       }
+      db.save();
+    }
+    if (!db.data.body.length) {
+      if (!db.data.settings.height) db.data.settings.height = 182;
+      const r1 = v => Math.round(v * 10) / 10;
+      const kg = [87.6, 87.1, 86.8, 86.2, 85.9, 85.1, 84.6];
+      kg.forEach((weight, i) => {
+        const d = addDays(new Date(), -10 * (kg.length - 1 - i) - 1);
+        const m = { weight, fat: r1(22.4 - i * 0.35) };
+        // Maßband nur jede zweite Messung, wie im echten Leben
+        if (i % 2 === 0) Object.assign(m, { chest: r1(104 + i * 0.25), waist: r1(96 - i * 0.7), hip: r1(101 - i * 0.4), armL: r1(36 + i * 0.15), armR: r1(36.5 + i * 0.15), thighL: r1(58 + i * 0.1), thighR: r1(58.5 + i * 0.1), calfL: 38, calfR: 38.5 });
+        db.data.body.push({ id: 'demob' + i, t: d.getTime(), d: dayKey(d), m });
+      });
       db.save();
     }
     return own;
