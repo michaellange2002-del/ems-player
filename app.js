@@ -16,7 +16,10 @@
   const PREFIX = DEMO ? 'impuls-demo.' : 'impuls.';
   const FEEL = ['Locker', 'Gut', 'Fordernd', 'Hart', 'Am Limit'];
   const TAGS = ['Ganzkörper', 'Oberkörper', 'Unterkörper', 'Rücken & Schulter', 'Sonstiges'];
-  const DEFAULT_GROUPS = ['Oberschenkel vorn', 'Oberschenkel hinten', 'Gesäß', 'Bauch', 'Unterer Rücken', 'Latissimus', 'Brust', 'Schultern', 'Bizeps', 'Trizeps'];
+  // Die 12 Muskelgruppen des eaglefit PRO, Namen und Reihenfolge wie im Kreis der Eaglefit-App (im Uhrzeigersinn)
+  const DEFAULT_GROUPS = ['Schulter', 'Oberer Rücken', 'Mittlerer Rücken', 'Unterer Rücken', 'Hinterer OS', 'Gesäß', 'Vorderer OS', 'Bauch Innen', 'Bauch Außen', 'Brust', 'Bizeps', 'Trizeps'];
+  // Erster Vorschlag aus Version 2; wird automatisch ersetzt, solange er nicht von Hand geändert wurde
+  const OLD_DEFAULT_GROUPS = ['Oberschenkel vorn', 'Oberschenkel hinten', 'Gesäß', 'Bauch', 'Unterer Rücken', 'Latissimus', 'Brust', 'Schultern', 'Bizeps', 'Trizeps'];
 
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -80,6 +83,11 @@
         store.set('db', d);
       }
       d.settings = { ...defaults(), ...d.settings };
+      if (JSON.stringify(d.settings.groups) === JSON.stringify(OLD_DEFAULT_GROUPS)) {
+        d.settings.groups = DEFAULT_GROUPS;
+        d.setT = Date.now(); // damit der Abgleich die neue Liste auch auf die anderen Geräte bringt
+        store.set('db', d);
+      }
       this.data = d;
     },
     save() { store.set('db', this.data); },
@@ -246,7 +254,7 @@
       deleted,
       categories: (aCat ? a.categories : b.categories) || {},
       catT: Math.max(a.catT || 0, b.catT || 0),
-      settings: { ...defaults(), ...((aSet ? a.settings : b.settings) || {}) },
+      settings: (s => (JSON.stringify(s.groups) === JSON.stringify(OLD_DEFAULT_GROUPS) ? { ...s, groups: DEFAULT_GROUPS } : s))({ ...defaults(), ...((aSet ? a.settings : b.settings) || {}) }),
       setT: Math.max(a.setT || 0, b.setT || 0),
       yt: (aYt ? a.yt : b.yt) || null,
       ytT: Math.max(a.ytT || 0, b.ytT || 0),
