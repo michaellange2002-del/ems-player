@@ -3,8 +3,8 @@
 //    weil der <video>-Player selbst keinen Authorization-Header senden kann;
 // 2. hält die App-Dateien vor, damit Impuls schnell startet und sich installieren lässt.
 // Bei jeder Änderung an app.css/app.js: Version hier und in index.html (?v=) erhöhen.
-const CACHE = 'impuls-v6';
-const SHELL = ['./', 'index.html', 'app.css?v=6', 'app.js?v=6', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
+const CACHE = 'impuls-v7';
+const SHELL = ['./', 'index.html', 'app.css?v=7', 'app.js?v=7', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 let token = null;
 
 self.addEventListener('install', e => {
@@ -49,9 +49,10 @@ async function stream(id, request) {
 }
 
 // App-Dateien: erst aus dem Netz (damit Updates sofort ankommen), ohne Netz aus dem Speicher.
+// no-cache: beim Server nachfragen statt den 10-Minuten-Zwischenspeicher von GitHub Pages zu nutzen.
 async function shell(request) {
   try {
-    const res = await fetch(request);
+    const res = await fetch(request, { cache: 'no-cache' });
     if (res.ok && res.type === 'basic') {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(request, copy));

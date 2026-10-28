@@ -1078,6 +1078,7 @@
   const login = scope => {
     showLogin('Melde dich im Google-Fenster an. Danach geht es hier von selbst weiter.');
     $('#loginErr').classList.add('info');
+    $('#loginBasic').hidden = false; // Google meldet Fehler nur im eigenen Fenster, daher den Ausweg gleich anbieten
     auth.request(scope)
       .then(() => { showApp(); go('home'); loadAll(); })
       .catch(e => { if (e.silent) return; showLogin(e.message); $('#loginBasic').hidden = false; });
