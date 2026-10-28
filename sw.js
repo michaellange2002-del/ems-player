@@ -2,8 +2,9 @@
 // 1. reicht Video-Anfragen (stream/<id>) an Google Drive weiter und hängt dabei den Login an,
 //    weil der <video>-Player selbst keinen Authorization-Header senden kann;
 // 2. hält die App-Dateien vor, damit Impuls schnell startet und sich installieren lässt.
-const CACHE = 'impuls-v1';
-const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
+// Bei jeder Änderung an app.css/app.js: Version hier und in index.html (?v=) erhöhen.
+const CACHE = 'impuls-v2';
+const SHELL = ['./', 'index.html', 'app.css?v=2', 'app.js?v=2', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 let token = null;
 
 self.addEventListener('install', e => {

@@ -35,7 +35,7 @@ h1,h2{text-wrap:balance}
 .small{font-size:13px}
 
 /* Grundgerüst */
-.app{height:100vh;height:100dvh;display:grid;grid-template-rows:minmax(0,1fr) auto}
+.app{height:100vh;height:100dvh;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto;overflow:hidden}
 .app[data-view="login"] .nav,.app[data-view="login"] .main{display:none}
 .app[data-view="app"] .login{display:none}
 
@@ -168,7 +168,8 @@ h1,h2{text-wrap:balance}
 .hint{font-size:12.5px;color:var(--muted)}
 
 /* Player */
-.player{position:fixed;inset:0;z-index:20;background:var(--player-bg);color:var(--player-fg)}
+.player{position:fixed;inset:0;z-index:20;background:var(--player-bg);color:var(--player-fg);overflow:hidden}
+.player > *{min-width:0}
 .pl-video{position:absolute;inset:0;display:grid;place-items:center;overflow:hidden}
 .pl-stage{position:relative;width:100%;height:100%}
 .pl-stage video{display:block;width:100%;height:100%;object-fit:contain;background:var(--player-bg)}
@@ -198,7 +199,7 @@ h1,h2{text-wrap:balance}
 .pl-play .ico{width:26px;height:26px}
 .pl-finish{flex-basis:100%;display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:14px;padding:13px 18px;background:var(--player-accent);color:#fff;font-weight:700;font-size:15px}
 /* YouTube: Bedienleisten nicht über das Video legen, damit YouTube-eigene Knöpfe (z. B. Werbung überspringen) frei bleiben */
-.player.yt{display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+.player.yt{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto}
 .player.yt .pl-top,.player.yt .pl-video,.player.yt .pl-bottom{position:relative;inset:auto}
 .player.yt .pl-top{grid-row:1;background:none;padding-bottom:10px}
 .player.yt .pl-video{grid-row:2}
@@ -262,6 +263,44 @@ h1,h2{text-wrap:balance}
 }
 @media (min-width:1100px){
   .lib-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+/* Kleine Handys */
+@media (max-width:380px){
+  .main{padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px))}
+  .a-title{font-size:24px}
+  .next-title{font-size:21px}
+  .week-count b{font-size:48px}
+  .stat{padding:10px}
+  .stat b{font-size:28px}
+  .btn-primary.big{font-size:16px;padding:13px 18px}
+  .vcard{grid-template-columns:112px minmax(0,1fr)}
+  .nav-btn{min-width:0;padding:6px 4px}
+  .pl-btn{padding:10px 11px}
+  .pl-btn span{display:none}
+}
+/* Wenig Höhe, z. B. Handy quer: alles kompakter, damit das Video Platz hat */
+@media (max-height:520px){
+  .main{padding-top:calc(14px + env(safe-area-inset-top,0px))}
+  .brand{margin-bottom:6px}
+  .brand span{display:none}
+  .nav-btn{padding-top:8px;padding-bottom:8px}
+  .a-title{font-size:26px}
+  .next .poster{aspect-ratio:2.4/1}
+  .week-count b{font-size:44px}
+  .pl-top{padding-top:calc(8px + env(safe-area-inset-top,0px));padding-bottom:18px}
+  .player.yt .pl-top{padding-bottom:6px}
+  .pl-title{font-size:17px}
+  .pl-sub{display:none}
+  .pl-btn{padding:8px 12px;font-size:13px}
+  .pl-btn span{display:none}
+  .pl-bottom{gap:2px;padding-top:22px;padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}
+  .player.yt .pl-bottom{padding-top:4px}
+  .pl-el{font-size:24px}
+  .pl-bar{padding:6px 0}
+  .pl-ctrl{flex-wrap:nowrap;justify-content:flex-start;gap:8px}
+  .pl-play{width:44px;height:44px}
+  .pl-play .ico{width:20px;height:20px}
+  .pl-finish{flex-basis:auto;margin-left:auto;padding:10px 14px;font-size:14px;white-space:nowrap}
 }
 @media (prefers-reduced-motion: reduce){
   .pl-top,.pl-bottom{transition:none}
