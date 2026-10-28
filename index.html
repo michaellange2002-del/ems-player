@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="app.css?v=13">
+<link rel="stylesheet" href="app.css?v=14">
 <script src="config.js"></script>
 </head>
 <body>
@@ -25,6 +25,7 @@
   <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
   <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18M8 7l-5 5 5 5M16 7l5 5-5 5"/></symbol>
   <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
 </svg>
 
 <div class="app" id="app" data-view="login">
@@ -67,6 +68,7 @@
       <div class="pl-head"><p class="pl-title" id="plTitle"></p><p class="pl-sub" id="plSub"></p></div>
       <button class="pl-btn" id="plRestart" hidden>Von vorn</button>
       <span class="pl-wake" id="plWake"><i></i>Bildschirm bleibt an</span>
+      <button class="pl-btn pl-fav" id="plFav" aria-pressed="false" aria-label="Als Favorit markieren">☆</button>
     </div>
     <div class="pl-bottom">
       <p class="pl-msg" id="plMsg" hidden></p>
@@ -93,6 +95,6 @@
 
   <div class="toast" id="toast" role="status" hidden></div>
 </div>
-<script src="app.js?v=13"></script>
+<script src="app.js?v=14"></script>
 </body>
 </html>

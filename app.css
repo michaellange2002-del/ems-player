@@ -82,8 +82,10 @@ h1,h2{text-wrap:balance}
 .poster{position:relative;display:block;aspect-ratio:16/9;max-width:100%;overflow:hidden;border-radius:12px;color:#fff;container-type:inline-size;isolation:isolate;background:#20262F}
 .poster::before,.poster::after{content:"";position:absolute;inset:0;z-index:-1}
 .poster img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0}
-.p-src,.p-dur,.p-title{z-index:1}
-.p-src{position:absolute;top:8px;left:8px;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;background:rgba(0,0,0,.5);padding:3px 6px;border-radius:5px}
+.p-badges,.p-dur,.p-title{z-index:1}
+.p-badges{position:absolute;top:8px;left:8px;display:flex;gap:4px;align-items:center}
+.p-fav{background:#F5B800;color:#1A1300;font-size:11px;font-weight:800;line-height:1;padding:3px 5px;border-radius:5px}
+.p-src{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;background:rgba(0,0,0,.5);padding:3px 6px;border-radius:5px}
 .p-src.yt{background:#C4161C}
 .p-dur{position:absolute;right:8px;top:8px;font-family:var(--font-mono);font-size:10px;background:rgba(0,0,0,.55);padding:3px 6px;border-radius:5px;font-variant-numeric:tabular-nums}
 .p-title{position:absolute;left:8%;right:8%;bottom:11%;font-family:var(--font-display);font-stretch:66%;font-weight:850;text-transform:uppercase;font-size:clamp(13px,11cqw,64px);line-height:.88;text-shadow:0 2px 14px rgba(0,0,0,.6)}
@@ -357,3 +359,16 @@ h1,h2{text-wrap:balance}
 .prep{list-style:none;margin:0;padding:0;display:grid;gap:12px}
 .prep li{display:flex;gap:12px;align-items:center;font-size:16px;font-weight:550}
 .prep .ico{width:22px;height:22px;color:var(--ok)}
+/* Favoriten, Ausblenden, Trainingstage */
+.vcard.is-hidden{opacity:.55}
+.toggles{display:grid;gap:8px}
+.pl-fav{font-size:20px;padding:8px 13px;line-height:1}
+.pl-fav[aria-pressed="true"]{background:#F5B800;border-color:#F5B800;color:#1A1300}
+.days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.days button{border:1px solid var(--app-line);background:var(--app-bg);color:var(--ink);border-radius:10px;padding:10px 0;font-weight:700;font-size:14px}
+.days button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.time-lbl{display:flex;align-items:center;gap:10px;font-weight:600}
+.time-lbl input{font:inherit;font-family:var(--font-mono);border:1px solid var(--app-line);background:var(--app-bg);color:var(--ink);border-radius:10px;padding:8px 10px}
+.planned{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted)}
+.planned .ico{width:18px;height:18px}
+.btn-link.left{justify-self:start;padding:4px 0}

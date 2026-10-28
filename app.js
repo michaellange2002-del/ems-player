@@ -68,7 +68,8 @@
 
   /* ---------- Daten: Verlauf, Kategorien, Einstellungen ----------
      Liegen lokal und als Impuls-Daten.json in Google Drive. Positionen zum Fortsetzen bleiben pro Gerät. */
-  const defaults = () => ({ goal: CFG.weeklyGoal || 2, rest: CFG.minRestDays ?? 2, groups: DEFAULT_GROUPS });
+  // plan: feste Trainingstage (0 = So … 6 = Sa) und Uhrzeit für den Kalender
+  const defaults = () => ({ goal: CFG.weeklyGoal || 2, rest: CFG.minRestDays ?? 2, groups: DEFAULT_GROUPS, plan: { days: [], time: '18:00' } });
   const db = {
     data: null,
     load() {
@@ -84,6 +85,7 @@
         store.set('db', d);
       }
       d.settings = { ...defaults(), ...d.settings };
+      d.prefs = { fav: {}, hidden: {}, ...d.prefs };
       if (JSON.stringify(d.settings.groups) === JSON.stringify(OLD_DEFAULT_GROUPS)) {
         d.settings.groups = DEFAULT_GROUPS;
         d.setT = Date.now(); // damit der Abgleich die neue Liste auch auf die anderen Geräte bringt
@@ -103,6 +105,16 @@
     setSettings(patch) { this.data.settings = { ...this.data.settings, ...patch }; this.data.setT = Date.now(); this.save(); sync.soon(); },
     // YouTube-Playlist wird zwischengespeichert, damit sie ohne YouTube-Anmeldung auf allen Geräten da ist
     setYT(yt) { this.data.yt = yt; this.data.ytT = Date.now(); this.save(); sync.soon(); },
+    // Favoriten und ausgeblendete Videos: { fav: { key: true }, hidden: { key: true } }
+    togglePref(kind, key) {
+      const p = { fav: {}, hidden: {}, ...this.data.prefs };
+      p[kind] = { ...p[kind] };
+      if (p[kind][key]) delete p[kind][key]; else p[kind][key] = true;
+      this.data.prefs = p;
+      this.data.prefT = Date.now();
+      this.save();
+      sync.soon();
+    },
   };
   const goal = () => db.data.settings.goal;
   const rest = () => db.data.settings.rest;
@@ -125,8 +137,14 @@
   const pos = {
     all: () => store.get('pos', {}),
     get: key => pos.all()[key] || 0,
-    set(key, t) { const p = pos.all(); p[key] = Math.round(t); store.set('pos', p); },
-    del(key) { const p = pos.all(); delete p[key]; store.set('pos', p); },
+    set(key, t) {
+      const p = pos.all(); p[key] = Math.round(t); store.set('pos', p);
+      const at = store.get('posAt', {}); at[key] = Date.now(); store.set('posAt', at);
+    },
+    del(key) {
+      const p = pos.all(); delete p[key]; store.set('pos', p);
+      const at = store.get('posAt', {}); delete at[key]; store.set('posAt', at);
+    },
   };
 
   /* ---------- Kategorien & Vorschaubilder ---------- */
@@ -153,7 +171,8 @@
   function poster(v) {
     const img = v.thumb ? `<img src="${esc(v.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
     const yt = v.src === 'yt';
-    return `<span class="poster ${v.art || 'p-gen'}">${img}<span class="p-src${yt ? ' yt' : ''}">${yt ? 'YouTube' : 'Eigenes Video'}</span>${v.dur ? `<span class="p-dur">${fmt(v.dur)}</span>` : ''}${yt ? '' : `<span class="p-title">${esc(v.title)}</span>`}</span>`;
+    const fav = isFav(v.key) ? '<span class="p-fav" aria-label="Favorit">★</span>' : '';
+    return `<span class="poster ${v.art || 'p-gen'}">${img}<span class="p-badges">${fav}<span class="p-src${yt ? ' yt' : ''}">${yt ? 'YouTube' : 'Eigenes Video'}</span></span>${v.dur ? `<span class="p-dur">${fmt(v.dur)}</span>` : ''}${yt ? '' : `<span class="p-title">${esc(v.title)}</span>`}</span>`;
   }
 
   /* ---------- Google-Anmeldung ----------
@@ -249,6 +268,7 @@
     const aCat = (a.catT || 0) >= (b.catT || 0);
     const aSet = (a.setT || 0) >= (b.setT || 0);
     const aYt = (a.ytT || 0) >= (b.ytT || 0);
+    const aPref = (a.prefT || 0) >= (b.prefT || 0);
     return {
       version: 1,
       sessions: [...byId.values()].sort((x, y) => x.t - y.t),
@@ -259,9 +279,13 @@
       setT: Math.max(a.setT || 0, b.setT || 0),
       yt: (aYt ? a.yt : b.yt) || null,
       ytT: Math.max(a.ytT || 0, b.ytT || 0),
+      prefs: (aPref ? a.prefs : b.prefs) || { fav: {}, hidden: {} },
+      prefT: Math.max(a.prefT || 0, b.prefT || 0),
     };
   }
-  const fingerprint = d => JSON.stringify([(d.sessions || []).map(s => s.id).sort(), [...(d.deleted || [])].sort(), d.catT || 0, d.setT || 0, d.ytT || 0]);
+  const fingerprint = d => JSON.stringify([(d.sessions || []).map(s => s.id).sort(), [...(d.deleted || [])].sort(), d.catT || 0, d.setT || 0, d.ytT || 0, d.prefT || 0]);
+  const isFav = key => !!db.data.prefs?.fav?.[key];
+  const isHidden = key => !!db.data.prefs?.hidden?.[key];
 
   const sync = {
     status: 'idle', last: store.get('syncedAt', 0), err: '', busy: false, again: false, timer: null,
@@ -338,7 +362,7 @@
   }
 
   /* ---------- Videos laden ---------- */
-  const state = { view: 'home', filter: 'Alle', videos: [], driveVideos: [], demoYt: null, drive: 'idle', driveErr: '', ytLoading: false, ytErr: null, folderId: null, install: null, editCats: false, trendGroup: null, sheet: null };
+  const state = { sugIndex: 0, skipResume: false, view: 'home', filter: 'Alle', videos: [], driveVideos: [], demoYt: null, drive: 'idle', driveErr: '', ytLoading: false, ytErr: null, folderId: null, install: null, editCats: false, trendGroup: null, sheet: null };
 
   async function loadDrive() {
     const name = (CFG.folderName || 'EMS Training').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -433,15 +457,35 @@
   }
 
   /* ---------- Start ---------- */
+  // Rangliste aller sichtbaren Videos (eigene und YouTube). Punkte:
+  // lange nicht gemacht (bis 30, noch nie = 25), anderer Körperbereich als beim letzten Training (+12),
+  // Favorit (+8), eigenes Trainer-Video (+3); das zuletzt trainierte Video rutscht ans Ende.
+  function ranking() {
+    const now = new Date();
+    const all = allSessions();
+    const last = all[all.length - 1];
+    const lastTag = last ? state.videos.find(v => v.key === last.key)?.tag || null : null;
+    return state.videos.filter(v => !isHidden(v.key)).map(v => {
+      const l = lastOf(v.key);
+      const days = l ? daysBetween(now, fromKey(l.d)) : null;
+      let score = days === null ? 25 : Math.min(days, 30);
+      const why = [days === null ? 'Noch nie trainiert' : `Zuletzt <b>${agoText(days)}</b>`];
+      if (lastTag && v.tag !== lastTag && v.tag !== 'Sonstiges') { score += 12; why.push(`anderer Körperbereich als zuletzt (${esc(lastTag)})`); }
+      if (isFav(v.key)) { score += 8; why.push('★ Favorit'); }
+      if (v.src === 'drive') score += 3;
+      if (last && last.key === v.key) score -= 50;
+      return { v, score, why: why.join(' · ') };
+    }).sort((a, b) => b.score - a.score);
+  }
   function suggestion() {
-    const p = pos.all();
-    const resume = state.videos.find(v => p[v.key] > 30 && (!v.dur || p[v.key] < v.dur - 30));
-    if (resume) return { v: resume, label: 'Weitermachen', why: `Weiter ab <b>${fmt(p[resume.key])}</b>` };
-    const own = state.videos.filter(v => v.src === 'drive');
-    if (!own.length) return null;
-    const ranked = own.map(v => ({ v, l: lastOf(v.key) })).sort((a, b) => (a.l ? a.l.t : 0) - (b.l ? b.l.t : 0));
-    const { v, l } = ranked[0];
-    return { v, label: 'Vorschlag für heute', why: l ? `Am längsten nicht dran: zuletzt <b>${agoText(daysBetween(new Date(), fromKey(l.d)))}</b>` : 'Noch nie trainiert' };
+    const p = pos.all(), at = store.get('posAt', {});
+    // Angefangenes Video der letzten 7 Tage geht vor
+    const resume = !state.skipResume && state.videos.find(v => !isHidden(v.key) && p[v.key] > 30 && (!v.dur || p[v.key] < v.dur - 30) && Date.now() - (at[v.key] || Date.now()) < 7 * DAY);
+    if (resume) return { v: resume, label: 'Weitermachen', why: `Weiter ab <b>${fmt(p[resume.key])}</b>`, more: true };
+    const r = ranking();
+    if (!r.length) return null;
+    const i = state.sugIndex % r.length;
+    return { v: r[i].v, label: i ? `Vorschlag ${i + 1} von ${r.length}` : 'Vorschlag für heute', why: r[i].why, more: r.length > 1 };
   }
 
   function renderHome() {
@@ -464,7 +508,7 @@
       next = `<article class="card next empty"><p class="label">Vorschlag für heute</p><p class="sub">${esc(text)}</p>${state.drive === 'loading' ? '' : '<div class="btn-row"><button class="btn-ghost" data-act="reload">Neu laden</button></div>'}</article>`;
     } else {
       const v = sug.v;
-      next = `<article class="card next">${poster(v)}<div class="next-body"><p class="label">${sug.label}</p><h2 class="next-title">${esc(v.title)}</h2><p class="meta">${fmt(v.dur)} Min. · ${esc(v.tag)} · ${v.src === 'yt' ? 'YouTube' : 'Eigenes Video'}</p><p class="why">${sug.why}</p><div class="btn-row"><button class="btn-primary big" data-play="${esc(v.key)}">${icon('i-play', 'fill')}Training starten</button><button class="btn-ghost" data-go="lib">Anderes Video</button></div></div></article>`;
+      next = `<article class="card next">${poster(v)}<div class="next-body"><p class="label">${sug.label}</p><h2 class="next-title">${esc(v.title)}</h2><p class="meta">${fmt(v.dur)} Min. · ${esc(v.tag)} · ${v.src === 'yt' ? 'YouTube' : 'Eigenes Video'}</p><p class="why">${sug.why}</p><div class="btn-row"><button class="btn-primary big" data-play="${esc(v.key)}">${icon('i-play', 'fill')}Training starten</button>${sug.more ? '<button class="btn-ghost" data-act="nextSug">Anderer Vorschlag</button>' : '<button class="btn-ghost" data-go="lib">Anderes Video</button>'}</div></div></article>`;
     }
 
     const wk = all.filter(s => { const n = daysBetween(fromKey(s.d), mon); return n >= 0 && n < 7; });
@@ -491,10 +535,40 @@
     $('#home').innerHTML = `
       <header class="a-head"><div><p class="a-date">${now.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</p><h1 class="a-title">${done >= g ? 'Wochenziel erreicht. Stark!' : `Bereit für Einheit ${done + 1} dieser Woche`}</h1></div></header>
       <div class="home-grid">${next}
-        <article class="card week"><p class="label">Wochenziel · KW ${isoWeek(now)}</p><p class="week-count"><b>${done}</b><span>von ${g}</span></p><ul class="slots">${slots}</ul>${chip}</article>
+        <article class="card week"><p class="label">Wochenziel · KW ${isoWeek(now)}</p><p class="week-count"><b>${done}</b><span>von ${g}</span></p><ul class="slots">${slots}</ul>${chip}${(p => (p ? `<p class="planned">${icon('i-cal')}Nächster Termin: ${fmtPlanned(p)}</p>` : '<button class="btn-link left" data-act="settings">Trainingstage festlegen</button>'))(nextPlanned())}</article>
         <article class="card streak"><p class="label">Serie · Einheiten pro Woche</p>${streakTxt}<div class="bars">${bars}</div></article>
       </div>${install}`;
   }
+
+  /* ---------- Trainingstage und Google Kalender ---------- */
+  const DAYCODE = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+  function nextPlanned(from = new Date()) {
+    const { days = [], time = '18:00' } = db.data.settings.plan || {};
+    if (!days.length) return null;
+    const [hh, mm] = time.split(':').map(Number);
+    for (let i = 0; i < 8; i++) {
+      const d = addDays(startOfDay(from), i);
+      const at = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh, mm);
+      if (days.includes(d.getDay()) && at > from) return at;
+    }
+    return null;
+  }
+  // Vorlage für einen wöchentlichen Serientermin; gespeichert wird erst, wenn du im Kalender bestätigst
+  function calendarUrl() {
+    const start = nextPlanned();
+    if (!start) return null;
+    const end = new Date(start.getTime() + 30 * 60e3);
+    const f = d => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}00`;
+    return 'https://calendar.google.com/calendar/render?' + new URLSearchParams({
+      action: 'TEMPLATE',
+      text: 'EMS-Training',
+      dates: `${f(start)}/${f(end)}`,
+      ctz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Berlin',
+      recur: `RRULE:FREQ=WEEKLY;BYDAY=${db.data.settings.plan.days.map(d => DAYCODE[d]).join(',')}`,
+      details: `Training mit Impuls: ${new URL('./', location.href).href}`,
+    });
+  }
+  const fmtPlanned = d => `${daysBetween(d, new Date()) === 0 ? 'heute' : daysBetween(d, new Date()) === 1 ? 'morgen' : fmtDay(d)}, ${pad(d.getHours())}:${pad(d.getMinutes())} Uhr`;
 
   /* ---------- Vor dem Start: kurzer Hinweis, einmal pro Trainingseinheit ---------- */
   const PREP = ['Anzug an, Akku geladen', 'Eaglefit-App verbunden', 'Wasser griffbereit', 'Handtuch bereitgelegt', 'Hanteln und andere Geräte bereitgelegt, falls nötig'];
@@ -528,40 +602,57 @@
   }
 
   function renderLib() {
-    const vids = state.videos;
-    const filters = ['Alle', 'Eigene', 'YouTube', ...TAGS.filter(t => vids.some(v => v.tag === t))];
+    const all = state.videos;
+    const hiddenCount = all.filter(v => isHidden(v.key)).length;
+    const vids = all.filter(v => !isHidden(v.key));
+    const filters = [
+      'Alle', ...(vids.some(v => isFav(v.key)) ? ['Favoriten'] : []), 'Eigene', 'YouTube',
+      ...TAGS.filter(t => vids.some(v => v.tag === t)), ...(hiddenCount ? ['Ausgeblendet'] : []),
+    ];
     if (!filters.includes(state.filter)) state.filter = 'Alle';
     const f = state.filter;
-    const list = vids.filter(v => f === 'Alle' || (f === 'Eigene' && v.src === 'drive') || (f === 'YouTube' && v.src === 'yt') || v.tag === f);
+    const list = f === 'Ausgeblendet'
+      ? all.filter(v => isHidden(v.key))
+      : vids.filter(v => f === 'Alle' || (f === 'Favoriten' && isFav(v.key)) || (f === 'Eigene' && v.src === 'drive') || (f === 'YouTube' && v.src === 'yt') || v.tag === f)
+        .sort((a, b) => isFav(b.key) - isFav(a.key)); // Favoriten zuerst
     const p = pos.all();
     const cards = list.map(v => {
       const l = lastOf(v.key), n = countOf(v.key), r = p[v.key];
       const lastTxt = l ? `Zuletzt ${agoText(daysBetween(new Date(), fromKey(l.d)))} · ${n}× trainiert` : 'Noch nicht trainiert';
       const prog = r > 30 && v.dur ? `<span class="v-prog"><i style="width:${Math.min(100, r / v.dur * 100)}%"></i></span><span class="v-last">Weiter ab ${fmt(r)}</span>` : '';
-      return `<button class="vcard" data-play="${esc(v.key)}">${poster(v)}<span class="v-body"><span class="v-title">${esc(v.title)}</span><span class="v-meta">${esc(v.tag)} · ${fmt(v.dur)} Min.${v.channel ? ' · ' + esc(v.channel) : ''}</span><span class="v-last">${lastTxt}</span>${prog}</span></button>`;
+      return `<button class="vcard${isHidden(v.key) ? ' is-hidden' : ''}" data-play="${esc(v.key)}">${poster(v)}<span class="v-body"><span class="v-title">${esc(v.title)}</span><span class="v-meta">${esc(v.tag)} · ${fmt(v.dur)} Min.${v.channel ? ' · ' + esc(v.channel) : ''}</span><span class="v-last">${lastTxt}</span>${prog}</span></button>`;
     }).join('');
     const own = vids.filter(v => v.src === 'drive').length;
     const driveNote = state.drive === 'err' && f !== 'YouTube'
       ? `<div class="notice bad"><b>Eigene Videos nicht geladen</b><span>${esc(state.driveErr)}</span><div class="btn-row"><button class="btn-ghost" data-act="reload">Neu laden</button></div></div>`
       : state.drive === 'loading' ? '<div class="notice"><span>Lade deine Videos aus Google Drive …</span></div>' : '';
     const ytNote = f === 'Alle' || f === 'YouTube' ? ytNotice() : '';
-    const editNote = state.editCats ? '<div class="notice"><span>Tippe auf ein Video, um seine Kategorie zu ändern.</span></div>' : '';
+    const editNote = state.editCats
+      ? '<div class="notice"><span>Tippe auf ein Video, um es als Favorit zu markieren, auszublenden oder seine Kategorie zu ändern.</span></div>'
+      : f === 'Ausgeblendet' ? '<div class="notice"><span>Diese Videos erscheinen nicht in der Liste und nicht im Vorschlag. Über „Bearbeiten“ holst du sie zurück.</span></div>' : '';
     $('#lib').innerHTML = `
-      <header class="a-head"><div><p class="a-date">${vids.length} Videos · ${own} eigene · ${vids.length - own} YouTube</p><h1 class="a-title">Bibliothek</h1></div>${vids.length ? `<button class="btn-ghost small-btn" data-act="editCats" aria-pressed="${state.editCats}">${state.editCats ? 'Fertig' : 'Kategorien ändern'}</button>` : ''}</header>
+      <header class="a-head"><div><p class="a-date">${vids.length} Videos · ${own} eigene · ${vids.length - own} YouTube</p><h1 class="a-title">Bibliothek</h1></div>${all.length ? `<button class="btn-ghost small-btn" data-act="editCats" aria-pressed="${state.editCats}">${state.editCats ? 'Fertig' : 'Bearbeiten'}</button>` : ''}</header>
       <div class="chips">${filters.map(x => `<button data-filter="${esc(x)}" aria-pressed="${x === f}">${esc(x)}</button>`).join('')}</div>
       ${driveNote}${ytNote}${editNote}
       <div class="lib-grid${state.editCats ? ' editing' : ''}">${cards}</div>`;
   }
 
-  function openCatPick(key) {
+  // Video bearbeiten: Favorit, Ausblenden, Kategorie
+  function openVideoEdit(key) {
     const v = state.videos.find(x => x.key === key);
     if (!v) return;
-    state.sheet = 'cat';
+    state.sheet = 'video';
+    const fav = isFav(key), hidden = isHidden(key);
     openSheet(`
-      <p class="label">Kategorie ändern</p>
+      <p class="label">Video bearbeiten</p>
       <h2 class="sheet-title">${esc(v.title)}</h2>
+      <div class="toggles">
+        <button class="pick-btn" data-act="togglePref" data-kind="fav" data-key="${esc(key)}" aria-pressed="${fav}"><b>${fav ? '★ Favorit' : '☆ Als Favorit markieren'}</b><span class="sub small">Steht oben in der Liste und wird öfter vorgeschlagen</span></button>
+        <button class="pick-btn" data-act="togglePref" data-kind="hidden" data-key="${esc(key)}" aria-pressed="${hidden}"><b>${hidden ? 'Ausgeblendet' : 'Ausblenden'}</b><span class="sub small">${hidden ? 'Tippen, um es wieder anzuzeigen' : 'Erscheint nicht mehr in Liste und Vorschlag'}</span></button>
+      </div>
+      <p class="q">Kategorie</p>
       <div class="pick">${TAGS.map(t => `<button class="pick-btn" data-act="pickCat" data-key="${esc(key)}" data-tag="${esc(t)}" aria-pressed="${t === v.tag}"><b>${esc(t)}</b>${t === v.baseTag ? '<span class="sub small">Vorschlag</span>' : ''}</button>`).join('')}</div>
-      <div class="btn-row"><button class="btn-ghost" data-act="closeSheet">Abbrechen</button></div>`);
+      <div class="btn-row"><button class="btn-ghost" data-act="closeSheet">Fertig</button></div>`);
   }
 
   /* ---------- Verlauf ---------- */
@@ -695,6 +786,12 @@
   function hideSheet() { $('#sheetWrap').hidden = true; state.sheet = null; }
   function closeSheet() { if (history.state?.sheet) history.back(); else hideSheet(); }
   $('#sheetWrap').addEventListener('click', e => { if (e.target === e.currentTarget) closeSheet(); });
+  $('#sheet').addEventListener('change', e => {
+    if (e.target.id !== 'planTime' || !e.target.value) return;
+    db.setSettings({ plan: { ...db.data.settings.plan, time: e.target.value } });
+    renderHome();
+    openSettings();
+  });
 
   let toastT;
   function toast(msg) {
@@ -755,6 +852,7 @@
       $('#plSub').textContent = `${v.tag} · ${fmt(v.dur)} Min.${this.startAt ? ` · weiter ab ${fmt(this.startAt)}` : ''}`;
       $('#plRestart').hidden = !this.startAt;
       $('#plMsg').hidden = true;
+      this.favIcon();
       const P = $('#player');
       P.hidden = false;
       P.classList.toggle('yt', v.src === 'yt');
@@ -910,6 +1008,12 @@
     },
     showBig(show) { $('#plBig').hidden = !show; },
     msg(text, html = '') { $('#plMsg').innerHTML = `<span>${esc(text)}</span>${html}`; $('#plMsg').hidden = false; this.wakeUi(); },
+    favIcon() {
+      const f = !!this.v && isFav(this.v.key);
+      $('#plFav').textContent = f ? '★' : '☆';
+      $('#plFav').setAttribute('aria-pressed', f);
+      $('#plFav').setAttribute('aria-label', f ? 'Favorit entfernen' : 'Als Favorit markieren');
+    },
     applyMirror() {
       $('#plStage').classList.toggle('mirror', this.mirrored);
       $('#plMirror').setAttribute('aria-pressed', this.mirrored);
@@ -1000,6 +1104,12 @@
     try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { /* nicht verfügbar */ }
   };
   $('#plFinish').onclick = () => player.finish(false);
+  $('#plFav').onclick = () => {
+    if (!player.v) return;
+    db.togglePref('fav', player.v.key);
+    player.favIcon();
+    toast(isFav(player.v.key) ? 'Als Favorit markiert' : 'Favorit entfernt');
+  };
   $('#plRestart').onclick = () => { player.startAt = 0; player.seekTo(0); $('#plRestart').hidden = true; };
   $('#plBar').onclick = e => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -1072,6 +1182,8 @@
     });
     pos.del(v.key);
     player.ended = true;
+    state.sugIndex = 0;
+    state.skipResume = false;
     leavePlayer();
     toast('Training gespeichert');
   }
@@ -1089,6 +1201,13 @@
         <div class="set-row"><div><b>Abgleich mit Google Drive</b><span class="sub" id="setSync">${esc(sync.text())}</span></div><button class="btn-ghost" data-act="syncNow">Jetzt abgleichen</button></div>
         <div class="set-row"><div><b>Wochenziel</b><span class="sub">Einheiten pro Woche</span></div>${stepper('goal', s.goal, '×')}</div>
         <div class="set-row"><div><b>Mindestpause</b><span class="sub">Tage zwischen zwei Einheiten</span></div>${stepper('rest', s.rest, s.rest === 1 ? ' Tag' : ' Tage')}</div>
+        <div class="set-col" id="planBox"><b>Trainingstage</b><span class="sub">Für den nächsten Termin auf der Startseite und deinen Google Kalender.</span>
+          <div class="days">${['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((n, i) => { const d = (i + 1) % 7; return `<button data-act="planDay" data-d="${d}" aria-pressed="${s.plan.days.includes(d)}">${n}</button>`; }).join('')}</div>
+          <label class="time-lbl" for="planTime">Uhrzeit <input type="time" id="planTime" value="${esc(s.plan.time)}"></label>
+          ${(url => (url
+            ? `<div class="btn-row"><a class="btn-primary" href="${esc(url)}" target="_blank" rel="noopener">${icon('i-cal')}In Google Kalender eintragen</a></div><span class="sub small">Öffnet Google Kalender mit einem wöchentlichen Serientermin. Dort mit „Speichern“ bestätigen.</span>`
+            : '<span class="sub small">Wähle mindestens einen Tag, dann kannst du die Termine in deinen Google Kalender eintragen.</span>'))(calendarUrl())}
+        </div>
         <div class="set-col"><b>Muskelgruppen</b><span class="sub">Eine pro Zeile, so wie in deiner Eaglefit-App.</span><textarea id="groupsInput" rows="6" aria-label="Muskelgruppen">${esc(s.groups.join('\n'))}</textarea><div class="btn-row"><button class="btn-ghost" data-act="saveGroups">Übernehmen</button></div></div>
         <div class="set-row"><div><b>YouTube-Playlist</b><span class="sub">${pl ? esc(pl) : 'Keine gewählt'}${db.data.yt ? ` · aktualisiert ${relTime(db.data.yt.at)}` : ''}</span></div><span class="btn-row"><button class="btn-ghost" data-act="ytRefresh">Aktualisieren</button><button class="btn-ghost" data-act="listPlaylists">Ändern</button></span></div>
         <div class="pick" id="plPick"></div>
@@ -1135,6 +1254,14 @@
       render();
       openSettings();
     },
+    planDay(t) {
+      const d = +t.dataset.d;
+      const plan = db.data.settings.plan;
+      const days = plan.days.includes(d) ? plan.days.filter(x => x !== d) : [...plan.days, d].sort();
+      db.setSettings({ plan: { ...plan, days } });
+      renderHome();
+      openSettings();
+    },
     saveGroups() {
       const list = [...new Set($('#groupsInput').value.split('\n').map(x => x.trim()).filter(Boolean))].slice(0, 16);
       if (!list.length) return toast('Bitte mindestens eine Muskelgruppe eintragen');
@@ -1143,7 +1270,13 @@
       toast('Muskelgruppen gespeichert');
     },
     editCats: () => { state.editCats = !state.editCats; renderLib(); },
-    pickCat: t => { db.setCategory(t.dataset.key, t.dataset.tag); closeSheet(); render(); toast(`Kategorie: ${t.dataset.tag}`); },
+    pickCat: t => { db.setCategory(t.dataset.key, t.dataset.tag); render(); openVideoEdit(t.dataset.key); toast(`Kategorie: ${t.dataset.tag}`); },
+    togglePref: t => { db.togglePref(t.dataset.kind, t.dataset.key); state.sugIndex = 0; render(); openVideoEdit(t.dataset.key); },
+    nextSug() {
+      if (suggestion()?.label === 'Weitermachen') state.skipResume = true;
+      else state.sugIndex++;
+      renderHome();
+    },
     trend: t => { state.trendGroup = t.dataset.g; renderHist(); },
     session: t => openSession(t.dataset.id),
     askDelete: t => openSession(t.dataset.id, true),
@@ -1186,7 +1319,7 @@
     if (!t) return;
     if (t.dataset.go) go(t.dataset.go);
     else if (t.dataset.play) {
-      if (state.editCats) openCatPick(t.dataset.play);
+      if (state.editCats) openVideoEdit(t.dataset.play);
       else { const v = state.videos.find(x => x.key === t.dataset.play); if (v) startTraining(v); }
     } else if (t.dataset.filter) { state.filter = t.dataset.filter; renderLib(); }
     else actions[t.dataset.act]?.(t);
