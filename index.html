@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="app.css?v=3">
+<link rel="stylesheet" href="app.css?v=4">
 <script src="config.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -84,24 +84,15 @@
   </section>
 
   <section class="sheet-wrap" id="doneWrap" hidden>
-    <div class="sheet" role="dialog" aria-labelledby="doneTitle">
-      <p class="label" id="doneLabel"></p>
-      <h2 class="sheet-title" id="doneTitle"></h2>
-      <p id="doneText"></p>
-      <div class="btn-row" id="doneBtns"></div>
-    </div>
+    <div class="sheet" id="doneSheet" role="dialog" aria-modal="true" aria-label="Training abschließen"></div>
   </section>
 
-  <section class="sheet-wrap" id="setWrap" hidden>
-    <div class="sheet" role="dialog" aria-labelledby="setTitle">
-      <h2 class="sheet-title" id="setTitle">Einstellungen</h2>
-      <div class="set-list" id="setBody"></div>
-      <div class="btn-row"><button class="btn-ghost" data-act="closeSettings">Schließen</button></div>
-    </div>
+  <section class="sheet-wrap" id="sheetWrap" hidden>
+    <div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
   </section>
 
   <div class="toast" id="toast" role="status" hidden></div>
 </div>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

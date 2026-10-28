@@ -2,13 +2,20 @@
   'use strict';
 
   const CFG = window.APP_CONFIG || {};
-  const SCOPES = ['https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/youtube.readonly'];
+  const S_DRIVE_READ = 'https://www.googleapis.com/auth/drive.readonly';
+  const S_DRIVE_FILE = 'https://www.googleapis.com/auth/drive.file';
+  const S_YT = 'https://www.googleapis.com/auth/youtube.readonly';
+  const SCOPES = [S_DRIVE_READ, S_DRIVE_FILE, S_YT];
+  const AUTH_VERSION = 2; // bei neuen Berechtigungen erhöhen: dann wird einmal neu angemeldet
   const DRIVE = 'https://www.googleapis.com/drive/v3/';
+  const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/';
   const YTAPI = 'https://www.googleapis.com/youtube/v3/';
+  const DATA_FILE = 'Impuls-Daten.json';
   const DEMO = new URLSearchParams(location.search).has('demo');
-  const GOAL = CFG.weeklyGoal || 2;
-  const REST = CFG.minRestDays ?? 2;
   const PREFIX = DEMO ? 'impuls-demo.' : 'impuls.';
+  const FEEL = ['Locker', 'Gut', 'Fordernd', 'Hart', 'Am Limit'];
+  const TAGS = ['Ganzkörper', 'Oberkörper', 'Unterkörper', 'Rücken & Schulter', 'Sonstiges'];
+  const DEFAULT_GROUPS = ['Oberschenkel vorn', 'Oberschenkel hinten', 'Gesäß', 'Bauch', 'Unterer Rücken', 'Latissimus', 'Brust', 'Schultern', 'Bizeps', 'Trizeps'];
 
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -20,6 +27,8 @@
     return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
   };
   const mins = s => Math.max(1, Math.round((s || 0) / 60));
+  const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const icon = (id, cls = '') => `<svg class="ico ${cls}"><use href="#${id}"/></svg>`;
 
   const store = {
@@ -44,25 +53,63 @@
   const WD = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
   const fmtDay = d => `${WD[d.getDay()]} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`;
   const agoText = n => n <= 0 ? 'heute' : n === 1 ? 'gestern' : `vor ${n} Tagen`;
-
-  /* ---------- Verlauf & Positionen (Version 1: nur auf diesem Gerät) ---------- */
-  const sessions = {
-    all: () => store.get('sessions', []),
-    add(s) { const a = this.all(); a.push(s); store.set('sessions', a); },
+  const relTime = ms => {
+    const m = Math.round((Date.now() - ms) / 60e3);
+    if (m < 1) return 'gerade eben';
+    if (m < 60) return `vor ${m} Min.`;
+    const d = new Date(ms);
+    return daysBetween(new Date(), d) === 0 ? `heute ${pad(d.getHours())}:${pad(d.getMinutes())}` : fmtDay(d);
   };
-  const lastOf = key => { const a = sessions.all(); for (let i = a.length - 1; i >= 0; i--) if (a[i].key === key) return a[i]; return null; };
-  const countOf = key => sessions.all().filter(s => s.key === key).length;
+
+  /* ---------- Daten: Verlauf, Kategorien, Einstellungen ----------
+     Liegen lokal und als Impuls-Daten.json in Google Drive. Positionen zum Fortsetzen bleiben pro Gerät. */
+  const defaults = () => ({ goal: CFG.weeklyGoal || 2, rest: CFG.minRestDays ?? 2, groups: DEFAULT_GROUPS });
+  const db = {
+    data: null,
+    load() {
+      let d = store.get('db', null);
+      if (!d) {
+        // Übernahme aus Version 1 (Verlauf nur auf dem Gerät)
+        const old = store.get('sessions', []);
+        d = {
+          version: 1,
+          sessions: old.map((s, i) => ({ id: uid() + i, t: fromKey(s.d).getTime() + i, ...s })),
+          deleted: [], categories: {}, catT: 0, settings: defaults(), setT: 0,
+        };
+        store.set('db', d);
+      }
+      d.settings = { ...defaults(), ...d.settings };
+      this.data = d;
+    },
+    save() { store.set('db', this.data); },
+    addSession(s) { this.data.sessions.push({ id: uid(), t: Date.now(), ...s }); this.save(); sync.soon(); },
+    deleteSession(id) {
+      this.data.sessions = this.data.sessions.filter(s => s.id !== id);
+      this.data.deleted.push(id);
+      this.save();
+      sync.soon();
+    },
+    setCategory(key, tag) { this.data.categories = { ...this.data.categories, [key]: tag }; this.data.catT = Date.now(); this.save(); sync.soon(); },
+    setSettings(patch) { this.data.settings = { ...this.data.settings, ...patch }; this.data.setT = Date.now(); this.save(); sync.soon(); },
+  };
+  const goal = () => db.data.settings.goal;
+  const rest = () => db.data.settings.rest;
+  const groups = () => db.data.settings.groups;
+  const allSessions = () => db.data.sessions;
+  const lastOf = key => { const a = allSessions(); for (let i = a.length - 1; i >= 0; i--) if (a[i].key === key) return a[i]; return null; };
+  const countOf = key => allSessions().filter(s => s.key === key).length;
+  const lastWithInts = () => { const a = allSessions(); for (let i = a.length - 1; i >= 0; i--) if (a[i].ints && Object.keys(a[i].ints).length) return a[i]; return null; };
   // Einheiten pro Woche für die letzten n Wochen, die letzte ist die aktuelle
   function weekCounts(n) {
     const start = addDays(monday(new Date()), -7 * (n - 1));
     const c = Array(n).fill(0);
-    for (const s of sessions.all()) {
+    for (const s of allSessions()) {
       const w = Math.floor(daysBetween(fromKey(s.d), start) / 7);
       if (w >= 0 && w < n) c[w]++;
     }
     return { c, start };
   }
-  const streakOf = c => { let k = c.length - 1, s = 0; if (c[k] < GOAL) k--; while (k >= 0 && c[k] >= GOAL) { s++; k--; } return s; };
+  const streakOf = c => { const g = goal(); let k = c.length - 1, s = 0; if (c[k] < g) k--; while (k >= 0 && c[k] >= g) { s++; k--; } return s; };
   const pos = {
     all: () => store.get('pos', {}),
     get: key => pos.all()[key] || 0,
@@ -71,7 +118,6 @@
   };
 
   /* ---------- Kategorien & Vorschaubilder ---------- */
-  const TAGS = ['Ganzkörper', 'Oberkörper', 'Unterkörper', 'Rücken & Schulter', 'Sonstiges'];
   function tagFromTitle(t) {
     t = t.toLowerCase();
     if (/ganzk(ö|oe)rper|full.?body/.test(t)) return 'Ganzkörper';
@@ -91,6 +137,7 @@
     const m = /P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(s || '') || [];
     return (+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0);
   };
+  const applyTags = () => state.videos.forEach(v => { v.tag = db.data.categories[v.key] || v.baseTag; });
   function poster(v) {
     const img = v.thumb ? `<img src="${esc(v.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
     const yt = v.src === 'yt';
@@ -99,12 +146,13 @@
 
   /* ---------- Google-Anmeldung ---------- */
   const auth = {
-    token: null, exp: 0, client: null, pending: null,
+    token: null, exp: 0, scope: '', client: null, pending: null,
     restore() {
       const t = store.get('token');
-      if (t && t.exp > Date.now() + 120e3) { this.token = t.value; this.exp = t.exp; this.share(); }
+      if (t && t.v === AUTH_VERSION && t.exp > Date.now() + 120e3) { this.token = t.value; this.exp = t.exp; this.scope = t.scope || ''; this.share(); }
     },
     valid(ms = 120e3) { return !!this.token && this.exp - Date.now() > ms; },
+    has(s) { return this.scope.split(' ').includes(s); },
     share() { navigator.serviceWorker?.controller?.postMessage({ type: 'token', token: this.token }); },
     ready: () => !!window.google?.accounts?.oauth2,
     ensureClient() {
@@ -126,7 +174,7 @@
       return new Promise((resolve, reject) => {
         if (!this.ensureClient()) return reject(new Error('Die Google-Anmeldung lädt noch. Bitte gleich noch einmal tippen.'));
         this.pending = { resolve, reject };
-        this.client.requestAccessToken({ prompt: store.get('consented') ? '' : 'consent' });
+        this.client.requestAccessToken({ prompt: store.get('consented') === AUTH_VERSION ? '' : 'consent' });
       });
     },
     done(r) {
@@ -135,8 +183,9 @@
       if (r.error) return p?.reject(new Error(r.error_description || r.error));
       this.token = r.access_token;
       this.exp = Date.now() + (r.expires_in || 3600) * 1000;
-      store.set('token', { value: this.token, exp: this.exp });
-      store.set('consented', true);
+      this.scope = r.scope || SCOPES.join(' ');
+      store.set('token', { value: this.token, exp: this.exp, scope: this.scope, v: AUTH_VERSION });
+      store.set('consented', AUTH_VERSION);
       this.share();
       p?.resolve();
     },
@@ -149,26 +198,124 @@
     },
   };
 
-  async function gapi(base, path, params) {
-    const r = await fetch(`${base}${path}?${new URLSearchParams(params)}`, { headers: { Authorization: 'Bearer ' + auth.token } });
+  async function gfetch(url, opts = {}) {
+    const r = await fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + auth.token, ...(opts.headers || {}) } });
+    if (r.ok) return r;
     const data = await r.json().catch(() => ({}));
-    if (r.ok) return data;
     const err = new Error(data.error?.message || 'Fehler ' + r.status);
     err.status = r.status;
     err.reason = [data.error?.status, ...(data.error?.errors || []).map(x => x.reason), ...(data.error?.details || []).map(x => x.reason)].filter(Boolean).join(' ');
     if (r.status === 401) auth.clear();
     throw err;
   }
+  const gapi = async (base, path, params) => (await gfetch(`${base}${path}?${new URLSearchParams(params)}`)).json();
+
+  /* ---------- Abgleich mit Google Drive ---------- */
+  // Zusammenführen: Einheiten aus beiden Ständen (gelöschte bleiben gelöscht),
+  // Kategorien und Einstellungen vom jeweils neueren Stand.
+  function merge(a, b) {
+    const deleted = [...new Set([...(a.deleted || []), ...(b.deleted || [])])];
+    const gone = new Set(deleted);
+    const byId = new Map();
+    for (const s of [...(b.sessions || []), ...(a.sessions || [])]) if (s?.id && !gone.has(s.id)) byId.set(s.id, s);
+    const aCat = (a.catT || 0) >= (b.catT || 0);
+    const aSet = (a.setT || 0) >= (b.setT || 0);
+    return {
+      version: 1,
+      sessions: [...byId.values()].sort((x, y) => x.t - y.t),
+      deleted,
+      categories: (aCat ? a.categories : b.categories) || {},
+      catT: Math.max(a.catT || 0, b.catT || 0),
+      settings: { ...defaults(), ...((aSet ? a.settings : b.settings) || {}) },
+      setT: Math.max(a.setT || 0, b.setT || 0),
+    };
+  }
+  const fingerprint = d => JSON.stringify([(d.sessions || []).map(s => s.id).sort(), [...(d.deleted || [])].sort(), d.catT || 0, d.setT || 0]);
+
+  const sync = {
+    status: 'idle', last: store.get('syncedAt', 0), err: '', busy: false, again: false, timer: null,
+    allowed() { return !DEMO && auth.valid(0) && auth.has(S_DRIVE_FILE); },
+    async findFile() {
+      const known = store.get('fileId');
+      if (known) return known;
+      const r = await gapi(DRIVE, 'files', { q: `name = '${DATA_FILE}' and trashed = false`, fields: 'files(id)', orderBy: 'modifiedTime desc', pageSize: 5 });
+      const id = r.files[0]?.id || null;
+      if (id) store.set('fileId', id);
+      return id;
+    },
+    async pull(id) {
+      try { return await (await gfetch(`${DRIVE}files/${id}?alt=media`)).json(); }
+      catch (e) { if (e.status === 404) { store.del('fileId'); return null; } throw e; }
+    },
+    async write(id, data) {
+      const body = JSON.stringify({ ...data, updated: new Date().toISOString() });
+      if (id) {
+        await gfetch(`${UPLOAD}files/${id}?uploadType=media`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body });
+        return id;
+      }
+      const create = async parents => {
+        const meta = { name: DATA_FILE, mimeType: 'application/json', ...(parents && { parents }) };
+        const b = 'impuls' + uid();
+        const multipart = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${b}--`;
+        const r = await gfetch(`${UPLOAD}files?uploadType=multipart&fields=id`, { method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${b}` }, body: multipart });
+        return (await r.json()).id;
+      };
+      // Am liebsten in den Ordner „EMS Training“, sonst in „Meine Ablage“
+      try { return await create(state.folderId ? [state.folderId] : null); }
+      catch (e) { if (state.folderId && (e.status === 403 || e.status === 404)) return create(null); throw e; }
+    },
+    async run() {
+      if (!this.allowed()) { this.status = 'off'; renderSyncBits(); return; }
+      if (this.busy) { this.again = true; return; }
+      this.busy = true;
+      this.status = 'syncing';
+      renderSyncBits();
+      try {
+        let id = await this.findFile();
+        let remote = id ? await this.pull(id) : null;
+        if (id && !remote) { id = await this.findFile(); remote = id ? await this.pull(id) : null; }
+        const merged = remote ? merge(db.data, remote) : db.data;
+        if (fingerprint(merged) !== fingerprint(db.data)) { db.data = merged; db.save(); render(); }
+        if (!remote || fingerprint(merged) !== fingerprint(remote)) store.set('fileId', await this.write(id, merged));
+        this.status = 'ok';
+        this.err = '';
+        this.last = Date.now();
+        store.set('syncedAt', this.last);
+      } catch (e) {
+        this.status = 'err';
+        this.err = e.message;
+      } finally {
+        this.busy = false;
+        renderSyncBits();
+        if (this.again) { this.again = false; this.run(); }
+      }
+    },
+    soon() { clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), 1200); },
+    text() {
+      if (DEMO) return 'Im Demo-Modus aus';
+      if (this.status === 'off') return auth.valid(0) && !auth.has(S_DRIVE_FILE) ? 'Aus: Beim Anmelden wurde das Speichern in Drive nicht erlaubt' : 'Aus: nicht angemeldet';
+      if (this.status === 'syncing') return 'Gleiche mit Google Drive ab …';
+      if (this.status === 'err') return 'Abgleich fehlgeschlagen: ' + this.err;
+      return this.last ? `Abgeglichen ${relTime(this.last)}` : 'Noch nicht abgeglichen';
+    },
+  };
+  function renderSyncBits() {
+    const line = $('#syncLine');
+    if (line) { line.dataset.s = sync.status; $('#syncText').textContent = sync.text(); }
+    const row = $('#setSync');
+    if (row) row.textContent = sync.text();
+  }
 
   /* ---------- Videos laden ---------- */
-  const state = { view: 'home', filter: 'Alle', videos: [], drive: 'idle', driveErr: '', yt: 'idle', ytErr: null, install: null };
+  const state = { view: 'home', filter: 'Alle', videos: [], drive: 'idle', driveErr: '', yt: 'idle', ytErr: null, folderId: null, install: null, editCats: false, trendGroup: null, sheet: null };
 
   async function loadDrive() {
     const name = (CFG.folderName || 'EMS Training').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const folders = await gapi(DRIVE, 'files', { q: `mimeType = 'application/vnd.google-apps.folder' and name = '${name}' and trashed = false`, fields: 'files(id)', pageSize: 5 });
     if (!folders.files.length) throw new Error(`Der Ordner „${CFG.folderName}“ wurde in deinem Google Drive nicht gefunden.`);
+    state.folderId = folders.files[0].id;
     const res = await gapi(DRIVE, 'files', {
-      q: `'${folders.files[0].id}' in parents and mimeType contains 'video/' and trashed = false`,
+      q: `'${state.folderId}' in parents and mimeType contains 'video/' and trashed = false`,
       fields: 'files(id,name,size,mimeType,thumbnailLink,videoMediaMetadata(durationMillis,width,height))',
       orderBy: 'name',
       pageSize: 100,
@@ -179,7 +326,7 @@
       return {
         key: 'd:' + f.id, src: 'drive', id: f.id, title,
         dur: Math.round((m.durationMillis || 0) / 1000),
-        tag: tagForName(title), art: artFor(title),
+        baseTag: tagForName(title), art: artFor(title),
         thumb: f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+$/, '=s640') : null,
       };
     });
@@ -204,7 +351,7 @@
       const th = v.snippet.thumbnails || {};
       return {
         key: 'y:' + v.id, src: 'yt', id: v.id, title: v.snippet.title, channel: v.snippet.channelTitle,
-        dur: isoDur(v.contentDetails.duration), tag: tagFromTitle(v.snippet.title), art: 'p-gen',
+        dur: isoDur(v.contentDetails.duration), baseTag: tagFromTitle(v.snippet.title), art: 'p-gen',
         thumb: (th.medium || th.high || th.default || {}).url || null,
       };
     });
@@ -232,6 +379,7 @@
     state.ytErr = y.status === 'rejected' ? ytProblem(y.reason) : null;
     state.videos = [...(d.value || []), ...(y.value || [])];
     render();
+    sync.run();
   }
 
   /* ---------- Start ---------- */
@@ -241,19 +389,20 @@
     if (resume) return { v: resume, label: 'Weitermachen', why: `Weiter ab <b>${fmt(p[resume.key])}</b>` };
     const own = state.videos.filter(v => v.src === 'drive');
     if (!own.length) return null;
-    const ranked = own.map(v => ({ v, l: lastOf(v.key) })).sort((a, b) => (a.l ? fromKey(a.l.d).getTime() : 0) - (b.l ? fromKey(b.l.d).getTime() : 0));
+    const ranked = own.map(v => ({ v, l: lastOf(v.key) })).sort((a, b) => (a.l ? a.l.t : 0) - (b.l ? b.l.t : 0));
     const { v, l } = ranked[0];
     return { v, label: 'Vorschlag für heute', why: l ? `Am längsten nicht dran: zuletzt <b>${agoText(daysBetween(new Date(), fromKey(l.d)))}</b>` : 'Noch nie trainiert' };
   }
 
   function renderHome() {
     const now = new Date();
+    const g = goal(), r = rest();
     const { c } = weekCounts(8);
     const done = c[7];
-    const all = sessions.all();
+    const all = allSessions();
     const last = all[all.length - 1];
     const gap = last ? daysBetween(now, fromKey(last.d)) : null;
-    const okFrom = last ? addDays(fromKey(last.d), REST) : null;
+    const okFrom = last ? addDays(fromKey(last.d), r) : null;
     const mon = monday(now);
 
     const sug = suggestion();
@@ -269,20 +418,20 @@
     }
 
     const wk = all.filter(s => { const n = daysBetween(fromKey(s.d), mon); return n >= 0 && n < 7; });
-    const slots = Array.from({ length: Math.max(GOAL, wk.length) }, (_, k) => {
+    const slots = Array.from({ length: Math.max(g, wk.length) }, (_, k) => {
       const s = wk[k];
-      if (s) return `<li class="slot on"><span class="dot">${icon('i-check')}</span><span><b>${fmtDay(fromKey(s.d))} · ${esc(s.title)}</b><small>${mins(s.sec)} Min.</small></span></li>`;
-      const when = k === wk.length ? (gap === null || gap >= REST ? 'Heute möglich' : `Ab ${fmtDay(okFrom)}`) : 'Diese Woche';
+      if (s) return `<li class="slot on"><span class="dot">${icon('i-check')}</span><span><b>${fmtDay(fromKey(s.d))} · ${esc(s.title)}</b><small>${mins(s.sec)} Min.${s.feel != null ? ' · ' + FEEL[s.feel] : ''}</small></span></li>`;
+      const when = k === wk.length ? (gap === null || gap >= r ? 'Heute möglich' : `Ab ${fmtDay(okFrom)}`) : 'Diese Woche';
       return `<li class="slot"><span class="dot">${k + 1}</span><span><b>Offen</b><small>${when}</small></span></li>`;
     }).join('');
     const chip = gap === null ? '<p class="chip">Noch keine Einheit gespeichert</p>'
-      : gap >= REST ? `<p class="chip ok">${icon('i-check')}Pause ok · letzte Einheit ${agoText(gap)}</p>`
+      : gap >= r ? `<p class="chip ok">${icon('i-check')}Pause ok · letzte Einheit ${agoText(gap)}</p>`
         : `<p class="chip warn">Letzte Einheit ${agoText(gap)} · nächste ab ${fmtDay(okFrom)}</p>`;
 
     const streak = streakOf(c);
-    const bars = c.map((n, k) => `<div class="bar${k === 7 ? ' cur' : ''}"><span class="col"><i style="height:${Math.min(n, GOAL) / GOAL * 100}%"></i></span><small>${isoWeek(addDays(mon, (k - 7) * 7))}</small></div>`).join('');
+    const bars = c.map((n, k) => `<div class="bar${k === 7 ? ' cur' : ''}"><span class="col"><i style="height:${Math.min(n, g) / g * 100}%"></i></span><small>${isoWeek(addDays(mon, (k - 7) * 7))}</small></div>`).join('');
     const streakTxt = all.length
-      ? `<p class="streak-num"><b>${streak}</b>${streak === 1 ? 'Woche' : 'Wochen'} in Folge ${GOAL}×</p>`
+      ? `<p class="streak-num"><b>${streak}</b>${streak === 1 ? 'Woche' : 'Wochen'} in Folge ${g}×</p>`
       : '<p class="sub">Nach deinem ersten Training siehst du hier deine Wochen.</p>';
 
     const ck = store.get('check', {});
@@ -295,9 +444,9 @@
       : '';
 
     $('#home').innerHTML = `
-      <header class="a-head"><div><p class="a-date">${now.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</p><h1 class="a-title">${done >= GOAL ? 'Wochenziel erreicht. Stark!' : `Bereit für Einheit ${done + 1} dieser Woche`}</h1></div></header>
+      <header class="a-head"><div><p class="a-date">${now.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</p><h1 class="a-title">${done >= g ? 'Wochenziel erreicht. Stark!' : `Bereit für Einheit ${done + 1} dieser Woche`}</h1></div></header>
       <div class="home-grid">${next}
-        <article class="card week"><p class="label">Wochenziel · KW ${isoWeek(now)}</p><p class="week-count"><b>${done}</b><span>von ${GOAL}</span></p><ul class="slots">${slots}</ul>${chip}</article>
+        <article class="card week"><p class="label">Wochenziel · KW ${isoWeek(now)}</p><p class="week-count"><b>${done}</b><span>von ${g}</span></p><ul class="slots">${slots}</ul>${chip}</article>
         <article class="card streak"><p class="label">Serie · Einheiten pro Woche</p>${streakTxt}<div class="bars">${bars}</div></article>
         <article class="card check"><p class="label">Vor dem Start</p><ul class="checklist">${list}</ul></article>
       </div>${install}`;
@@ -308,7 +457,7 @@
     const ck = store.get('check', {});
     const items = new Set(ck.d === today ? ck.items : []);
     const i = +e.target.dataset.ck;
-    e.target.checked ? items.add(i) : items.delete(i);
+    if (e.target.checked) items.add(i); else items.delete(i);
     store.set('check', { d: today, items: [...items] });
   });
 
@@ -344,16 +493,47 @@
       ? `<div class="notice bad"><b>Eigene Videos nicht geladen</b><span>${esc(state.driveErr)}</span><div class="btn-row"><button class="btn-ghost" data-act="reload">Neu laden</button></div></div>`
       : state.drive === 'loading' ? '<div class="notice"><span>Lade deine Videos aus Google Drive …</span></div>' : '';
     const ytNote = f === 'Alle' || f === 'YouTube' ? ytNotice() : '';
+    const editNote = state.editCats ? '<div class="notice"><span>Tippe auf ein Video, um seine Kategorie zu ändern.</span></div>' : '';
     $('#lib').innerHTML = `
-      <header class="a-head"><div><p class="a-date">${vids.length} Videos · ${own} eigene · ${vids.length - own} YouTube</p><h1 class="a-title">Bibliothek</h1></div></header>
+      <header class="a-head"><div><p class="a-date">${vids.length} Videos · ${own} eigene · ${vids.length - own} YouTube</p><h1 class="a-title">Bibliothek</h1></div>${vids.length ? `<button class="btn-ghost small-btn" data-act="editCats" aria-pressed="${state.editCats}">${state.editCats ? 'Fertig' : 'Kategorien ändern'}</button>` : ''}</header>
       <div class="chips">${filters.map(x => `<button data-filter="${esc(x)}" aria-pressed="${x === f}">${esc(x)}</button>`).join('')}</div>
-      ${driveNote}${ytNote}
-      <div class="lib-grid">${cards}</div>`;
+      ${driveNote}${ytNote}${editNote}
+      <div class="lib-grid${state.editCats ? ' editing' : ''}">${cards}</div>`;
+  }
+
+  function openCatPick(key) {
+    const v = state.videos.find(x => x.key === key);
+    if (!v) return;
+    state.sheet = 'cat';
+    openSheet(`
+      <p class="label">Kategorie ändern</p>
+      <h2 class="sheet-title">${esc(v.title)}</h2>
+      <div class="pick">${TAGS.map(t => `<button class="pick-btn" data-act="pickCat" data-key="${esc(key)}" data-tag="${esc(t)}" aria-pressed="${t === v.tag}"><b>${esc(t)}</b>${t === v.baseTag ? '<span class="sub small">Vorschlag</span>' : ''}</button>`).join('')}</div>
+      <div class="btn-row"><button class="btn-ghost" data-act="closeSheet">Abbrechen</button></div>`);
   }
 
   /* ---------- Verlauf ---------- */
+  function chart(pts) {
+    if (pts.length < 2) return `<p class="sub">${pts.length ? `Bisher ein Wert: ${pts[0].v}. Ab der zweiten Einheit siehst du hier den Verlauf.` : 'Noch keine Werte.'}</p>`;
+    const vals = pts.map(p => p.v);
+    let lo = Math.max(0, Math.floor((Math.min(...vals) - 2) / 5) * 5);
+    let hi = Math.ceil((Math.max(...vals) + 2) / 5) * 5;
+    if (hi - lo < 10) hi = lo + 10;
+    const step = hi - lo > 30 ? 10 : 5;
+    const W = 440, H = 150, L = 30, R = 34, T = 14, B = 24;
+    const x = i => L + i * (W - L - R) / (pts.length - 1);
+    const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.v).toFixed(1)}`).join(' ');
+    const area = `${line} L${x(pts.length - 1).toFixed(1)} ${H - B} L${x(0).toFixed(1)} ${H - B} Z`;
+    let grid = '';
+    for (let t = lo; t <= hi; t += step) grid += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"/><text x="${L - 6}" y="${(y(t) + 3.5).toFixed(1)}" text-anchor="end">${t}</text>`;
+    const last = pts[pts.length - 1];
+    const dots = pts.slice(0, -1).map((p, i) => `<circle class="pt" cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3"/>`).join('');
+    return `<svg class="trend-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Verlauf von ${pts[0].v} auf ${last.v}">${grid}<path class="area" d="${area}"/><path class="line" d="${line}"/>${dots}<circle class="end" cx="${x(pts.length - 1).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="5"/><text class="val" x="${(x(pts.length - 1) + 9).toFixed(1)}" y="${(y(last.v) + 4).toFixed(1)}">${last.v}</text><text x="${x(0)}" y="${H - 6}">${fmtDay(pts[0].d)}</text><text x="${x(pts.length - 1)}" y="${H - 6}" text-anchor="end">${fmtDay(last.d)}</text></svg>`;
+  }
+
   function renderHist() {
-    const all = sessions.all();
+    const all = allSessions();
     const { c, start } = weekCounts(12);
     const avg = (c.reduce((a, b) => a + b, 0) / 12).toFixed(1).replace('.', ',');
     const secs = all.reduce((a, s) => a + (s.sec || 0), 0);
@@ -372,20 +552,49 @@
       }
     }
     cal += '<span></span>' + Array.from({ length: 12 }, (_, w) => `<span>${isoWeek(addDays(start, w * 7))}</span>`).join('');
-    const list = all.slice(-12).reverse().map(s => `<li><span class="s-date">${fmtDay(fromKey(s.d))}</span><span class="s-title">${esc(s.title)}</span><span class="s-min">${mins(s.sec)} Min.</span></li>`).join('');
+
+    const withInts = all.filter(s => s.ints);
+    const gs = [...groups(), ...new Set(withInts.flatMap(s => Object.keys(s.ints)))].filter((g, i, arr) => arr.indexOf(g) === i && withInts.some(s => s.ints[g] != null));
+    if (!gs.includes(state.trendGroup)) state.trendGroup = gs[0] || null;
+    const trend = gs.length
+      ? `<div class="chips small">${gs.map(g => `<button data-act="trend" data-g="${esc(g)}" aria-pressed="${g === state.trendGroup}">${esc(g)}</button>`).join('')}</div>${chart(withInts.filter(s => s.ints[state.trendGroup] != null).slice(-12).map(s => ({ v: s.ints[state.trendGroup], d: fromKey(s.d) })))}`
+      : '<p class="sub">Noch keine Intensitäts-Werte. Trag sie nach dem Training im Abschluss ein, dann siehst du hier, wie sie sich entwickeln.</p>';
+
+    const list = all.slice(-15).reverse().map(s => `<li><button class="s-row" data-act="session" data-id="${esc(s.id)}"><span class="s-date">${fmtDay(fromKey(s.d))}</span><span class="s-title">${esc(s.title)}</span><span class="s-min">${mins(s.sec)} Min.</span>${s.feel != null ? `<span class="s-feel f${s.feel}">${FEEL[s.feel]}</span>` : ''}${s.ints ? `<span class="s-int">${Object.entries(s.ints).slice(0, 3).map(([k, n]) => `${esc(k)} ${n}`).join(' · ')}</span>` : ''}</button></li>`).join('');
+
     $('#hist').innerHTML = `
       <header class="a-head"><div><p class="a-date">Letzte 12 Wochen</p><h1 class="a-title">Verlauf</h1></div></header>
+      <p class="sync-line" id="syncLine" data-s="${sync.status}"><i></i><span id="syncText">${esc(sync.text())}</span>${DEMO ? '' : (sync.status === 'off' && auth.valid(0) ? '<button class="btn-ghost small-btn" data-act="relogin">Neu anmelden</button>' : '<button class="btn-ghost small-btn" data-act="syncNow">Jetzt abgleichen</button>')}</p>
       <div class="stats"><div class="stat"><b>${all.length}</b><span>Einheiten</span></div><div class="stat"><b>${avg}</b><span>Ø pro Woche</span></div><div class="stat"><b>${h} h ${m}</b><span>Minuten Training</span></div></div>
       <div class="hist-grid">
         <article class="card"><p class="label">Trainingstage</p><div class="cal">${cal}</div></article>
-        <article class="card"><p class="label">Letzte Einheiten</p>${list ? `<ol class="sess">${list}</ol>` : '<p class="sub">Noch keine Einheit gespeichert. Nach deinem ersten Training steht sie hier.</p>'}</article>
-      </div>
-      <p class="hint">Der Verlauf liegt in Version 1 nur auf diesem Gerät. Mit Version 2 wird er über dein Google Drive zwischen Tablet und Handy abgeglichen.</p>`;
+        <article class="card"><p class="label">Intensität · letzte 12 Einheiten</p>${trend}</article>
+        <article class="card list-card"><p class="label">Letzte Einheiten</p>${list ? `<ol class="sess">${list}</ol>` : '<p class="sub">Noch keine Einheit gespeichert. Nach deinem ersten Training steht sie hier.</p>'}</article>
+      </div>`;
   }
 
-  function render() { renderHome(); renderLib(); renderHist(); }
+  function openSession(id, confirm = false) {
+    const s = allSessions().find(x => x.id === id);
+    if (!s) return closeSheet();
+    state.sheet = 'session';
+    const ints = s.ints && Object.keys(s.ints).length
+      ? `<div class="kv">${Object.entries(s.ints).map(([g, n]) => `<span>${esc(g)}</span><b>${n}</b>`).join('')}</div>`
+      : '<p class="sub">Keine Intensitäts-Werte notiert.</p>';
+    const buttons = confirm
+      ? `<p class="sub">Diese Einheit wirklich löschen? Sie verschwindet auch auf deinen anderen Geräten.</p><div class="btn-row"><button class="btn-danger" data-act="deleteSession" data-id="${esc(s.id)}">Ja, löschen</button><button class="btn-ghost" data-act="session" data-id="${esc(s.id)}">Abbrechen</button></div>`
+      : `<div class="btn-row"><button class="btn-ghost" data-act="closeSheet">Schließen</button><button class="btn-ghost danger" data-act="askDelete" data-id="${esc(s.id)}">Löschen</button></div>`;
+    openSheet(`
+      <p class="label">${fromKey(s.d).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+      <h2 class="sheet-title">${esc(s.title)}</h2>
+      <p>${mins(s.sec)} Minuten${s.feel != null ? ` · ${FEEL[s.feel]}` : ''}${s.src === 'yt' ? ' · YouTube' : ''}</p>
+      ${s.note ? `<p class="note-view">${esc(s.note)}</p>` : ''}
+      ${ints}
+      ${buttons}`);
+  }
 
-  /* ---------- Navigation ---------- */
+  function render() { applyTags(); renderHome(); renderLib(); renderHist(); }
+
+  /* ---------- Navigation, Blätter, Hinweise ---------- */
   function go(view) {
     state.view = view;
     $$('[data-s]').forEach(el => { el.hidden = el.dataset.s !== view; });
@@ -398,6 +607,9 @@
     $('#loginErr').hidden = !msg;
   }
   function showApp() { $('#app').dataset.view = 'app'; }
+  function openSheet(html) { $('#sheet').innerHTML = html; $('#sheetWrap').hidden = false; }
+  function closeSheet() { $('#sheetWrap').hidden = true; state.sheet = null; }
+  $('#sheetWrap').addEventListener('click', e => { if (e.target === e.currentTarget) closeSheet(); });
 
   let toastT;
   function toast(msg) {
@@ -428,13 +640,17 @@
       $('#plWake').classList.remove('on');
     },
   };
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && wake.want) wake.on(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (wake.want) wake.on();
+    if (sync.allowed() && Date.now() - sync.last > 60e3) sync.run();
+  });
 
   /* ---------- Player ---------- */
   const pv = $('#pv');
   const player = {
     v: null, kind: null, yt: null, ytApi: null, poll: null, idleT: null,
-    saveT: 0, watched: 0, lastT: 0, startAt: 0, pendingStart: 0, ended: false,
+    saveT: 0, watched: 0, lastT: 0, startAt: 0, pendingStart: 0, ended: false, wasIdle: false,
     mirrored: store.get('mirror', false),
 
     open(v) {
@@ -623,10 +839,8 @@
       if (!this.v || !$('#doneWrap').hidden) return;
       this.pause();
       this.ended = ended;
-      const v = this.v;
       const sec = ended ? (this.dur() || this.cur()) : Math.min(this.dur() || Infinity, this.startAt + this.watched);
-      this.doneSec = Math.round(sec);
-      openDone(v, this.doneSec, ended);
+      openDone(this.v, Math.round(sec), ended);
     },
     retry() {
       const v = this.v;
@@ -697,31 +911,74 @@
   $('#plStage').addEventListener('click', () => { if (!player.wasIdle) player.toggle(); });
   window.addEventListener('resize', () => { if (player.v && player.kind === 'yt') player.fitYT(); });
 
-  /* ---------- Abschluss ---------- */
+  /* ---------- Abschluss: Gefühl, Intensität, Notiz ---------- */
+  const done = { v: null, sec: 0, ended: false, feel: null };
+  const feelButtons = () => FEEL.map((f, k) => `<button type="button" data-act="feel" data-k="${k}" aria-pressed="${done.feel === k}"><span class="bars5">${[0, 1, 2, 3, 4].map(j => `<i class="${j <= k ? 'f' : ''}"></i>`).join('')}</span><span>${f}</span></button>`).join('');
   function openDone(v, sec, ended) {
-    const n = weekCounts(1).c[0] + 1;
-    $('#doneLabel').textContent = `${ended ? 'Geschafft' : 'Training beenden'} · ${v.title}`;
-    $('#doneTitle').textContent = n >= GOAL ? `Einheit ${n} diese Woche · Wochenziel erreicht` : `Einheit ${n} von ${GOAL} diese Woche`;
-    $('#doneText').textContent = `Du hast ${mins(sec)} Minuten trainiert. Soll ich das Training speichern?`;
-    $('#doneBtns').innerHTML = `<button class="btn-primary" data-act="saveSession">${icon('i-check')}Speichern</button>`
-      + (ended ? '' : '<button class="btn-ghost" data-act="closeDone">Weiter trainieren</button>')
-      + '<button class="btn-ghost" data-act="discardSession">Nicht speichern</button>';
+    Object.assign(done, { v, sec, ended, feel: null });
+    const n = weekCounts(1).c[0] + 1, g = goal();
+    const prev = lastWithInts();
+    const ints = groups().map((name, i) => {
+      const val = prev?.ints?.[name];
+      return `<div class="int"><span>${esc(name)}</span><span class="step"><button type="button" data-act="intStep" data-i="${i}" data-d="-1" aria-label="${esc(name)} weniger">−</button><input type="number" inputmode="numeric" min="0" max="100" id="int${i}" data-g="${esc(name)}" value="${val ?? ''}" placeholder="–" aria-label="${esc(name)}"><button type="button" data-act="intStep" data-i="${i}" data-d="1" aria-label="${esc(name)} mehr">+</button></span></div>`;
+    }).join('');
+    $('#doneSheet').innerHTML = `
+      <p class="label">${ended ? 'Geschafft' : 'Training beenden'} · ${esc(v.title)}</p>
+      <h2 class="sheet-title">${n >= g ? `Einheit ${n} diese Woche · Wochenziel erreicht` : `Einheit ${n} von ${g} diese Woche`}</h2>
+      <p class="sub">Du hast ${mins(sec)} Minuten trainiert.</p>
+      <p class="q">Wie war's?</p>
+      <div class="feel" id="feel">${feelButtons()}</div>
+      <p class="q">Intensität notieren<span>${prev ? `Optional. Vorausgefüllt mit deinen Werten vom ${fmtDay(fromKey(prev.d))}.` : 'Optional. Trag die Werte aus deiner Eaglefit-App ein.'}</span></p>
+      <div class="ints">${ints}</div>
+      <input class="note" id="doneNote" type="text" maxlength="200" placeholder="Notiz, z. B. „Waden gekrampft“" aria-label="Notiz">
+      <div class="btn-row"><button class="btn-primary" data-act="saveSession">${icon('i-check')}Speichern</button><button class="btn-ghost" data-act="saveNoValues">Ohne Werte speichern</button></div>
+      <div class="btn-row">${ended ? '' : '<button class="btn-ghost" data-act="closeDone">Weiter trainieren</button>'}<button class="btn-link" data-act="discardSession">Nicht speichern</button></div>`;
     $('#doneWrap').hidden = false;
+    $('#doneSheet').scrollTop = 0;
+  }
+  function saveDone(withValues) {
+    const v = player.v;
+    if (!v) return;
+    let ints = null;
+    if (withValues) {
+      ints = {};
+      $$('#doneSheet input[data-g]').forEach(inp => { if (inp.value !== '' && !Number.isNaN(+inp.value)) ints[inp.dataset.g] = clamp(Math.round(+inp.value), 0, 100); });
+      if (!Object.keys(ints).length) ints = null;
+    }
+    const note = $('#doneNote').value.trim();
+    db.addSession({
+      d: dayKey(new Date()), key: v.key, title: v.title, src: v.src, sec: done.sec,
+      ...(done.feel != null && { feel: done.feel }), ...(ints && { ints }), ...(note && { note }),
+    });
+    pos.del(v.key);
+    player.ended = true;
+    leavePlayer();
+    go('home');
+    toast('Training gespeichert');
   }
 
   /* ---------- Einstellungen ---------- */
+  const stepper = (k, val, suffix) => `<span class="stepper"><button data-act="setStep" data-k="${k}" data-d="-1" aria-label="weniger">−</button><output>${val}${suffix}</output><button data-act="setStep" data-k="${k}" data-d="1" aria-label="mehr">+</button></span>`;
   function openSettings() {
+    state.sheet = 'settings';
+    const s = db.data.settings;
     const pl = store.get('playlist', CFG.youtubePlaylistId || '');
-    $('#setBody').innerHTML = `
-      <div class="set-row"><div><b>Google-Konto</b><span class="sub">${DEMO ? 'Demo-Modus' : 'Angemeldet'}</span></div><button class="btn-ghost" data-act="signout">Abmelden</button></div>
-      <div class="set-row"><div><b>YouTube-Playlist</b><span class="sub">${pl ? esc(pl) : 'Keine gewählt'}</span></div><button class="btn-ghost" data-act="listPlaylists">Ändern</button></div>
-      <div class="pick" id="plPick"></div>
-      ${state.install ? '<div class="set-row"><div><b>Als App installieren</b><span class="sub">Impuls auf den Startbildschirm legen</span></div><button class="btn-ghost" data-act="install">Installieren</button></div>' : ''}
-      <div class="set-row"><div><b>Test-Player</b><span class="sub">Prüft das Abspielen auf diesem Gerät</span></div><a class="btn-ghost" href="test.html">Öffnen</a></div>
-      <p class="sub small">Impuls · Version 1</p>`;
-    $('#setWrap').hidden = false;
+    openSheet(`
+      <h2 class="sheet-title">Einstellungen</h2>
+      <div class="set-list">
+        <div class="set-row"><div><b>Google-Konto</b><span class="sub">${DEMO ? 'Demo-Modus' : 'Angemeldet'}</span></div><button class="btn-ghost" data-act="signout">Abmelden</button></div>
+        <div class="set-row"><div><b>Abgleich mit Google Drive</b><span class="sub" id="setSync">${esc(sync.text())}</span></div><button class="btn-ghost" data-act="syncNow">Jetzt abgleichen</button></div>
+        <div class="set-row"><div><b>Wochenziel</b><span class="sub">Einheiten pro Woche</span></div>${stepper('goal', s.goal, '×')}</div>
+        <div class="set-row"><div><b>Mindestpause</b><span class="sub">Tage zwischen zwei Einheiten</span></div>${stepper('rest', s.rest, s.rest === 1 ? ' Tag' : ' Tage')}</div>
+        <div class="set-col"><b>Muskelgruppen</b><span class="sub">Eine pro Zeile, so wie in deiner Eaglefit-App.</span><textarea id="groupsInput" rows="6" aria-label="Muskelgruppen">${esc(s.groups.join('\n'))}</textarea><div class="btn-row"><button class="btn-ghost" data-act="saveGroups">Übernehmen</button></div></div>
+        <div class="set-row"><div><b>YouTube-Playlist</b><span class="sub">${pl ? esc(pl) : 'Keine gewählt'}</span></div><button class="btn-ghost" data-act="listPlaylists">Ändern</button></div>
+        <div class="pick" id="plPick"></div>
+        ${state.install ? '<div class="set-row"><div><b>Als App installieren</b><span class="sub">Impuls auf den Startbildschirm legen</span></div><button class="btn-ghost" data-act="install">Installieren</button></div>' : ''}
+        <div class="set-row"><div><b>Test-Player</b><span class="sub">Prüft das Abspielen auf diesem Gerät</span></div><a class="btn-ghost" href="test.html">Öffnen</a></div>
+      </div>
+      <p class="sub small">Impuls · Version 2</p>
+      <div class="btn-row"><button class="btn-ghost" data-act="closeSheet">Schließen</button></div>`);
   }
-  $('#setWrap').addEventListener('click', e => { if (e.target === e.currentTarget) e.currentTarget.hidden = true; });
 
   /* ---------- Aktionen ---------- */
   const actions = {
@@ -730,8 +987,9 @@
       .then(() => { if (player.v) player.retry(); else loadAll(); toast('Angemeldet'); })
       .catch(e => toast(e.message)),
     settings: () => openSettings(),
-    closeSettings: () => { $('#setWrap').hidden = true; },
-    signout: () => { auth.signOut(); $('#setWrap').hidden = true; state.videos = []; showLogin(); },
+    closeSheet: () => closeSheet(),
+    signout: () => { auth.signOut(); closeSheet(); state.videos = []; showLogin(); },
+    syncNow: () => sync.run(),
     async listPlaylists() {
       const box = $('#plPick');
       box.innerHTML = '<p class="sub">Lade deine Playlists …</p>';
@@ -744,7 +1002,27 @@
         box.innerHTML = `<p class="sub">${esc(ytProblem(e).msg)}</p>`;
       }
     },
-    pickPlaylist: t => { store.set('playlist', t.dataset.id); $('#setWrap').hidden = true; toast('Playlist gewählt'); loadAll(); },
+    pickPlaylist: t => { store.set('playlist', t.dataset.id); closeSheet(); toast('Playlist gewählt'); loadAll(); },
+    setStep(t) {
+      const k = t.dataset.k;
+      const lim = k === 'goal' ? [1, 7] : [0, 6];
+      db.setSettings({ [k]: clamp(db.data.settings[k] + +t.dataset.d, ...lim) });
+      render();
+      openSettings();
+    },
+    saveGroups() {
+      const list = [...new Set($('#groupsInput').value.split('\n').map(x => x.trim()).filter(Boolean))].slice(0, 16);
+      if (!list.length) return toast('Bitte mindestens eine Muskelgruppe eintragen');
+      db.setSettings({ groups: list });
+      render();
+      toast('Muskelgruppen gespeichert');
+    },
+    editCats: () => { state.editCats = !state.editCats; renderLib(); },
+    pickCat: t => { db.setCategory(t.dataset.key, t.dataset.tag); closeSheet(); render(); toast(`Kategorie: ${t.dataset.tag}`); },
+    trend: t => { state.trendGroup = t.dataset.g; renderHist(); },
+    session: t => openSession(t.dataset.id),
+    askDelete: t => openSession(t.dataset.id, true),
+    deleteSession: t => { db.deleteSession(t.dataset.id); closeSheet(); render(); toast('Einheit gelöscht'); },
     async install() {
       const e = state.install;
       if (!e) return;
@@ -752,20 +1030,18 @@
       e.prompt();
       await e.userChoice.catch(() => {});
       renderHome();
-      $('#setWrap').hidden = true;
+      closeSheet();
     },
     plRetry: () => player.retry(),
-    closeDone: () => { $('#doneWrap').hidden = true; },
-    saveSession() {
-      const v = player.v;
-      if (!v) return;
-      sessions.add({ d: dayKey(new Date()), key: v.key, title: v.title, src: v.src, sec: player.doneSec });
-      pos.del(v.key);
-      player.ended = true;
-      leavePlayer();
-      go('home');
-      toast('Training gespeichert');
+    feel: t => { done.feel = +t.dataset.k; $('#feel').innerHTML = feelButtons(); },
+    intStep(t) {
+      const inp = $('#int' + t.dataset.i);
+      const cur = inp.value === '' ? 0 : +inp.value || 0;
+      inp.value = clamp(cur + +t.dataset.d, 0, 100);
     },
+    closeDone: () => { $('#doneWrap').hidden = true; },
+    saveSession: () => saveDone(true),
+    saveNoValues: () => saveDone(false),
     discardSession() {
       const v = player.v;
       if (v && player.ended) pos.del(v.key);
@@ -777,8 +1053,10 @@
     const t = e.target.closest('[data-go],[data-play],[data-filter],[data-act]');
     if (!t) return;
     if (t.dataset.go) go(t.dataset.go);
-    else if (t.dataset.play) { const v = state.videos.find(x => x.key === t.dataset.play); if (v) player.open(v); }
-    else if (t.dataset.filter) { state.filter = t.dataset.filter; renderLib(); }
+    else if (t.dataset.play) {
+      if (state.editCats) openCatPick(t.dataset.play);
+      else { const v = state.videos.find(x => x.key === t.dataset.play); if (v) player.open(v); }
+    } else if (t.dataset.filter) { state.filter = t.dataset.filter; renderLib(); }
     else actions[t.dataset.act]?.(t);
   });
 
@@ -793,16 +1071,21 @@
   /* ---------- Demo-Modus (?demo): Beispieldaten ohne Anmeldung, nur zum Ansehen ---------- */
   function demoData() {
     const own = [['Lanzarote', 1267], ['Norwegen Woche 2', 1362], ['Oberkörper Eskalation', 1340], ['Rücken Schulter Workout', 1264], ['Training in Norwegen', 1275]]
-      .map(([title, dur]) => ({ key: 'd:demo-' + title, src: 'drive', id: 'demo', title, dur, tag: tagForName(title), art: artFor(title), thumb: null }));
-    const yt = [{ key: 'y:y_06KgZeT9c', src: 'yt', id: 'y_06KgZeT9c', title: '20 Minuten eaglefit EMS Ganzkörper-Workout', channel: 'eaglefit', dur: 1200, tag: 'Ganzkörper', art: 'p-gen', thumb: 'https://i.ytimg.com/vi/y_06KgZeT9c/mqdefault.jpg' }];
-    if (!store.get('sessions')) {
+      .map(([title, dur]) => ({ key: 'd:demo-' + title, src: 'drive', id: 'demo', title, dur, baseTag: tagForName(title), art: artFor(title), thumb: null }));
+    const yt = [{ key: 'y:y_06KgZeT9c', src: 'yt', id: 'y_06KgZeT9c', title: '20 Minuten eaglefit EMS Ganzkörper-Workout', channel: 'eaglefit', dur: 1337, baseTag: 'Ganzkörper', art: 'p-gen', thumb: 'https://i.ytimg.com/vi/y_06KgZeT9c/mqdefault.jpg' }];
+    if (!db.data.sessions.length) {
       const mon = monday(new Date());
-      const seed = [];
-      for (let w = 6; w >= 1; w--) for (const d of [0, 3]) {
-        const v = own[seed.length % own.length];
-        seed.push({ d: dayKey(addDays(mon, -7 * w + d)), key: v.key, title: v.title, src: 'drive', sec: v.dur });
+      let i = 0;
+      for (let w = 6; w >= 1; w--) {
+        for (const d of [0, 3]) {
+          const v = own[i % own.length];
+          const base = 44 + i;
+          const ints = Object.fromEntries(groups().map((g, k) => [g, base - (k % 5) * 3]));
+          db.data.sessions.push({ id: 'demo' + i, t: addDays(mon, -7 * w + d).getTime(), d: dayKey(addDays(mon, -7 * w + d)), key: v.key, title: v.title, src: 'drive', sec: v.dur, feel: [1, 2, 2, 3][i % 4], ints });
+          i++;
+        }
       }
-      store.set('sessions', seed);
+      db.save();
     }
     return [...own, ...yt];
   }
@@ -816,6 +1099,7 @@
     navigator.serviceWorker.register('sw.js').catch(() => { /* ohne Service Worker laufen nur YouTube-Videos */ });
   }
 
+  db.load();
   if (DEMO) {
     state.videos = demoData();
     state.drive = 'ok';
@@ -828,6 +1112,8 @@
   } else {
     const gis = setInterval(() => { if (auth.ensureClient()) clearInterval(gis); }, 150);
     auth.restore();
-    if (auth.valid()) { showApp(); go('home'); loadAll(); } else { render(); showLogin(); }
+    const old = store.get('token');
+    if (auth.valid()) { showApp(); go('home'); loadAll(); }
+    else { render(); showLogin(old && old.v !== AUTH_VERSION ? 'Impuls darf jetzt deinen Verlauf in Google Drive speichern. Dafür brauchst du einmal eine neue Anmeldung.' : ''); }
   }
 })();
