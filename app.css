@@ -254,13 +254,15 @@ h1,h2{text-wrap:balance}
 .bars5{display:flex;gap:2px}
 .bars5 i{display:block;width:5px;height:12px;border-radius:2px;background:var(--app-line)}
 .bars5 i.f{background:var(--pulse)}
-.ints{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.int{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px;border:1px solid var(--app-line);border-radius:12px;padding:4px 4px 4px 10px;min-width:0}
-.int > span:first-child{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.step,.stepper{display:flex;align-items:center;gap:2px}
-.step button,.stepper button{width:32px;height:34px;border-radius:9px;border:0;background:var(--app-bg);font-weight:700;font-size:18px;color:var(--ink)}
-.step input{width:38px;text-align:center;border:0;background:transparent;color:var(--ink);font-family:var(--font-mono);font-weight:600;font-size:15px;padding:0;-moz-appearance:textfield;appearance:textfield}
-.step input::-webkit-outer-spin-button,.step input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+/* Intensität: eine Zeile je Muskelgruppe, voller Name, große Tasten und Eingabefeld */
+.ints{display:grid;grid-template-columns:minmax(0,1fr);gap:6px}
+.int{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;border:1px solid var(--app-line);border-radius:12px;padding:5px 5px 5px 14px;min-width:0}
+.int > span:first-child{font-weight:600;font-size:15px;line-height:1.2}
+.step,.stepper{display:flex;align-items:center;gap:4px}
+.stepper button{width:32px;height:34px;border-radius:9px;border:0;background:var(--app-bg);font-weight:700;font-size:18px;color:var(--ink)}
+.step button{width:44px;height:44px;border-radius:10px;border:0;background:var(--app-bg);font-weight:700;font-size:22px;color:var(--ink)}
+.step input{width:62px;height:44px;text-align:center;border:1px solid var(--app-line);border-radius:10px;background:var(--app-card);color:var(--ink);font-family:var(--font-mono);font-weight:600;font-size:20px;padding:0}
+.step input:focus{border-color:var(--accent);outline:2px solid var(--accent-soft)}
 .stepper output{min-width:60px;text-align:center;font-family:var(--font-mono);font-weight:600}
 .note{width:100%;border:1px solid var(--app-line);background:var(--app-bg);color:var(--ink);border-radius:12px;padding:12px 14px;font-size:15px}
 .toast{position:fixed;left:50%;bottom:calc(86px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:40;background:var(--ink);color:var(--app-card);padding:10px 16px;border-radius:12px;font-weight:600;font-size:14px;display:flex;gap:8px;align-items:center;max-width:calc(100% - 32px)}
@@ -296,7 +298,8 @@ h1,h2{text-wrap:balance}
   .stat b{font-size:44px}
   .hist-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .list-card{grid-column:1/-1}
-  .ints{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .ints{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #doneSheet{width:min(780px,94vw)}
   .pl-top{padding-left:max(24px,env(safe-area-inset-left,0px));padding-right:max(24px,env(safe-area-inset-right,0px))}
   .pl-wake.on{display:inline-flex}
   .pl-title{font-size:24px}

@@ -31,6 +31,7 @@
     return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
   };
   const mins = s => Math.max(1, Math.round((s || 0) / 60));
+  const minText = s => { const m = mins(s); return `${m} ${m === 1 ? 'Minute' : 'Minuten'}`; };
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const icon = (id, cls = '') => `<svg class="ico ${cls}"><use href="#${id}"/></svg>`;
@@ -638,7 +639,7 @@
     openSheet(`
       <p class="label">${fromKey(s.d).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
       <h2 class="sheet-title">${esc(s.title)}</h2>
-      <p>${mins(s.sec)} Minuten${s.feel != null ? ` · ${FEEL[s.feel]}` : ''}${s.src === 'yt' ? ' · YouTube' : ''}</p>
+      <p>${minText(s.sec)}${s.feel != null ? ` · ${FEEL[s.feel]}` : ''}${s.src === 'yt' ? ' · YouTube' : ''}</p>
       ${s.note ? `<p class="note-view">${esc(s.note)}</p>` : ''}
       ${ints}
       ${buttons}`);
@@ -1016,15 +1017,15 @@
     const prev = lastWithInts();
     const ints = groups().map((name, i) => {
       const val = prev?.ints?.[name];
-      return `<div class="int"><span>${esc(name)}</span><span class="step"><button type="button" data-act="intStep" data-i="${i}" data-d="-1" aria-label="${esc(name)} weniger">−</button><input type="number" inputmode="numeric" min="0" max="100" id="int${i}" data-g="${esc(name)}" value="${val ?? ''}" placeholder="–" aria-label="${esc(name)}"><button type="button" data-act="intStep" data-i="${i}" data-d="1" aria-label="${esc(name)} mehr">+</button></span></div>`;
+      return `<div class="int"><span>${esc(name)}</span><span class="step"><button type="button" data-act="intStep" data-i="${i}" data-d="-1" aria-label="${esc(name)} weniger">−</button><input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" enterkeyhint="next" autocomplete="off" id="int${i}" data-i="${i}" data-g="${esc(name)}" value="${val ?? ''}" placeholder="–" aria-label="${esc(name)}"><button type="button" data-act="intStep" data-i="${i}" data-d="1" aria-label="${esc(name)} mehr">+</button></span></div>`;
     }).join('');
     $('#doneSheet').innerHTML = `
       <p class="label">${ended ? 'Geschafft' : 'Training beenden'} · ${esc(v.title)}</p>
       <h2 class="sheet-title">${n >= g ? `Einheit ${n} diese Woche · Wochenziel erreicht` : `Einheit ${n} von ${g} diese Woche`}</h2>
-      <p class="sub">Du hast ${mins(sec)} Minuten trainiert.</p>
+      <p class="sub">Du hast ${minText(sec)} trainiert.</p>
       <p class="q">Wie war's?</p>
       <div class="feel" id="feel">${feelButtons()}</div>
-      <p class="q">Intensität notieren<span>${prev ? `Optional. Vorausgefüllt mit deinen Werten vom ${fmtDay(fromKey(prev.d))}.` : 'Optional. Trag die Werte aus deiner Eaglefit-App ein.'}</span></p>
+      <p class="q">Intensität notieren<span>${prev ? `Optional. Vorausgefüllt mit deinen Werten vom ${fmtDay(fromKey(prev.d))}` : 'Optional. Trag die Werte aus deiner Eaglefit-App ein.'} Tippe ins Feld, um eine Zahl einzugeben.</span></p>
       <div class="ints">${ints}</div>
       <input class="note" id="doneNote" type="text" maxlength="200" placeholder="Notiz, z. B. „Waden gekrampft“" aria-label="Notiz">
       <div class="btn-row"><button class="btn-primary" data-act="saveSession">${icon('i-check')}Speichern</button><button class="btn-ghost" data-act="saveNoValues">Ohne Werte speichern</button></div>
@@ -1033,6 +1034,25 @@
     $('#doneWrap').hidden = false;
     $('#doneSheet').scrollTop = 0;
   }
+  // Werte direkt eintippen: nur Ziffern, alter Wert wird markiert, „Weiter“ springt zur nächsten Gruppe
+  const doneSheet = $('#doneSheet');
+  doneSheet.addEventListener('input', e => {
+    if (e.target.matches('input[data-g]')) e.target.value = e.target.value.replace(/\D/g, '').slice(0, 3);
+  });
+  doneSheet.addEventListener('focusin', e => {
+    if (!e.target.matches('input[data-g]')) return;
+    const inp = e.target;
+    setTimeout(() => { inp.select(); inp.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 50);
+  });
+  doneSheet.addEventListener('focusout', e => {
+    if (e.target.matches('input[data-g]') && e.target.value !== '') e.target.value = clamp(+e.target.value, 0, 100);
+  });
+  doneSheet.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || !e.target.matches('input[data-g]')) return;
+    e.preventDefault();
+    ($('#int' + (+e.target.dataset.i + 1)) || $('#doneNote')).focus();
+  });
+
   function saveDone(withValues) {
     const v = player.v;
     if (!v) return;
