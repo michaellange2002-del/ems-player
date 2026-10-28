@@ -170,11 +170,11 @@
       return true;
     },
     // Muss direkt aus einem Tipp heraus aufgerufen werden, sonst blockiert der Browser das Anmeldefenster.
-    request() {
+    request(scope) {
       return new Promise((resolve, reject) => {
         if (!this.ensureClient()) return reject(new Error('Die Google-Anmeldung lädt noch. Bitte gleich noch einmal tippen.'));
         this.pending = { resolve, reject };
-        this.client.requestAccessToken({ prompt: store.get('consented') === AUTH_VERSION ? '' : 'consent' });
+        this.client.requestAccessToken({ prompt: store.get('consented') === AUTH_VERSION ? '' : 'consent', ...(scope && { scope }) });
       });
     },
     done(r) {
@@ -1060,11 +1060,12 @@
     else actions[t.dataset.act]?.(t);
   });
 
-  $('#loginBtn').onclick = () => {
-    auth.request()
-      .then(() => { showApp(); go('home'); loadAll(); })
-      .catch(e => showLogin(e.message));
-  };
+  // Klappt die Anmeldung nicht, gibt es eine Anmeldung ohne Drive-Abgleich (nur Lesen wie in Version 1).
+  const login = scope => auth.request(scope)
+    .then(() => { showApp(); go('home'); loadAll(); })
+    .catch(e => { showLogin(e.message); $('#loginBasic').hidden = false; });
+  $('#loginBtn').onclick = () => login();
+  $('#loginBasic').onclick = () => login([S_DRIVE_READ, S_YT].join(' '));
 
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); state.install = e; renderHome(); });
 

@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="app.css?v=4">
+<link rel="stylesheet" href="app.css?v=5">
 <script src="config.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -35,6 +35,7 @@
       <p class="lede">Deine EMS-Trainingsvideos aus Google Drive und YouTube.</p>
       <button class="btn-primary big" id="loginBtn">Mit Google anmelden</button>
       <p class="login-err" id="loginErr" hidden></p>
+      <button class="btn-ghost" id="loginBasic" hidden>Ohne Drive-Abgleich anmelden</button>
       <p class="sub small">Impuls liest nur deine Videos und deine YouTube-Playlist. Beim ersten Mal zeigt Google „App nicht überprüft“. Tippe dann auf „Erweitert“ und gehe weiter zur App.</p>
     </div>
   </section>
@@ -93,6 +94,6 @@
 
   <div class="toast" id="toast" role="status" hidden></div>
 </div>
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
